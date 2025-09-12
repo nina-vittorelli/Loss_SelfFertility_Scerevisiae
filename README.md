@@ -1,4 +1,4 @@
-# Repeated losses of self-fertility in _Saccharomyce cerevisiae_ evolution
+# Repeated losses of self-fertility in _Saccharomyces cerevisiae_ evolution
 
 ## Description
 
