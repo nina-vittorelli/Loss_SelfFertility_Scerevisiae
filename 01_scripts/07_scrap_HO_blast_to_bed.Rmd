@@ -1,0 +1,289 @@
+---
+title: "HO in ScRAP - analysis of the blast results"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+---
+
+# ENVIRONMENT
+
+```{r}
+# environment 
+renv::load()
+renv::restore()
+```
+
+```{r}
+# library
+library(tidyverse)
+```
+
+```{r}
+# INPUT
+
+# path to cured ScRAP metadata
+metadata_path <- "03_output/01_cleaned_panels/scrap_clean.csv"
+
+# Path to the blast results
+blast_results_path <- "03_output/05_HO_sequences_scrap/blast_merged.csv"
+
+```
+
+```{r}
+## OUTPUT 
+
+# intermediary files
+bed_output_path <- "03_output/05_HO_sequences_scrap/bedfiles/"
+
+# creates the directories for the outputs
+if (!dir.exists(bed_output_path)) {
+  dir.create(bed_output_path, recursive = TRUE, showWarnings = FALSE)
+}
+```
+
+
+# LOAD METADATA TO REMOVE ASSEMBLIES WITH AN ARTIFICIAL DELETION FOR HO
+```{r}
+metadata <- read_delim(metadata_path)
+```
+# LOAD THE BLAST RESULTS
+```{r}
+blast_results_raw <- read_delim(blast_results_path, delim=" ")
+blast_results <- blast_results_raw %>% 
+    rowwise() %>%
+    mutate(
+    
+        # keeps the information about the id of the strain and assembly
+        scrap_id = str_split_i(assembly_file, "\\.", 1), 
+        scrap_id = case_when(
+          # Changing the name for the CGH strains
+          scrap_id == "CGH_1" ~ "CGH",
+          TRUE ~ scrap_id), 
+        original_isolate_id = str_split_i(scrap_id, "_", 1),
+        assembly_type = str_split_i(assembly_file, "\\.", 3)) %>%
+  
+  # remove the strains with artificial deletion in ChrIV
+    filter(scrap_id %in% metadata$scrap_id, 
+        # removes S288C assembly (redundant with SGDref)
+        scrap_id != "S288C", 
+        # remove collapsed assemblies and keep only the phased one
+        assembly_type != "collapsed")
+
+blast_results
+```
+# THE WEIRD CASES TO REMOVE
+
+## CFF HP2: contiguity issue
+```{r}
+blast_results %>%
+  filter(str_detect(assembly_file, "CFF.asm01.HP2")) %>%
+  select(assembly_file, sseqid, slen, qlen, length, sstart, send, qstart, qend, mismatch, gapopen)
+```
+Lack of contiguity: the HO coding sequence reaches the end of chrIV_3. Lack the last 470bp. We filter out the hit from CFF HP2 for further analyses. 
+
+## ANL block100_contig2: assembly error?
+```{r}
+# ANL all results
+blast_results %>%
+    filter(str_detect(assembly_file, "ANL")) %>%
+  select(assembly_file, sseqid, slen, qlen, length, sstart, send, qstart, qend, mismatch, gapopen) %>%
+    arrange(sseqid) 
+# ANL block100_contig2
+blast_results %>%
+    filter(str_detect(assembly_file, "ANL") & sseqid == "block100_contig2") %>%
+  select(assembly_file, sseqid, slen, qlen, length, sstart, send, qstart, qend, mismatch, gapopen)
+```
+Poor quality alignment close to the end of the contig. We already have four hits for HO  in the rest of the assembly. We believe the hit in block100_contig2 is likely due to an assembly error. We filter out the hit from ANL block100_contig2 for further analyses. 
+
+## CBM HP2: : contiguity issue
+```{r}
+blast_results %>%
+    filter(str_detect(assembly_file, "CBM.asm01.HP2")) %>%
+    select(c(assembly_file, sseqid, slen, qlen, length, sstart, send, qstart, qend, mismatch, gapopen ))
+```
+The hit reaches the end of the contig chrIV_1, the first 1144bp of the cds are lacking. We filter out this hit from CBM HP2 for further analyses. 
+
+```{r}
+# filtering
+blast_results_clean  <- blast_results %>%
+    filter(!(str_detect(assembly_file, "CFF.asm01.HP2"))) %>%
+    filter(!(str_detect(assembly_file, "ANL") & sseqid == "block100_contig2")) %>%
+    filter(!(str_detect(assembly_file, "CBM.asm01.HP2"))) 
+```
+
+# NUMBER OF SEQUENCES
+
+```{r}
+blast_results_clean %>%
+  
+  # create a variable for the assembly
+  mutate(assembly = paste(scrap_id, assembly_type, sep = ".")) %>%
+  
+  # count the presence of the hit in each scaffold
+  group_by(scrap_id, assembly, assembly_type, qseqid, sseqid) %>%
+  summarise(presence = as.integer(n() > 0)) %>%
+  pivot_wider(names_from = qseqid, values_from = presence, values_fill = 0) %>%
+  
+  # HP1 and HP2 are grouped
+  mutate(assembly_type = case_when(
+    assembly_type %in% c("HP1", "HP2") ~ "HP1_HP2", 
+    TRUE ~ assembly_type)) %>%
+  
+  # count the number of hits in the assembly of an isolate
+  group_by(scrap_id, assembly_type) %>%
+  summarise(HOgene_in_pHS2 = sum(HOgene_in_pHS2)) %>%
+  
+  # add the ploidy 
+  full_join(metadata %>% 
+              select(scrap_id,  ploidy_OI_corrected), 
+            by = "scrap_id") %>%
+  
+  # expected number of hits
+  mutate(expected_nb = case_when(
+    assembly_type == "HP0" ~ 1,
+    assembly_type == "HP1_HP2" ~ 2,
+    assembly_type == "HP" ~ ploidy_OI_corrected, 
+    TRUE ~ NA), 
+    
+    # is there the expected number of hits?
+    check = (HOgene_in_pHS2 == expected_nb) %>% 
+      replace_na(FALSE)) %>%
+  ungroup() %>%
+  
+  select(scrap_id, assembly_type, ploidy_OI_corrected, check, expected_nb, HOgene_in_pHS2) %>%
+  
+  arrange(check) 
+```
+
+- Problems identified before: CBM, CFF
+
+- Polyploids with less hits than their ploidy (n=5): ATV, AVN, BEM, CPS, CRE.
+
+- Polyploids with no hit at all (n=3): BAD, CFC, CGH
+
+```{r}
+blast_results_raw %>% 
+    rowwise() %>%
+    mutate(
+        
+        # keeps the information about the id of the strain and assembly
+        scrap_id = str_split_i(assembly_file, "\\.", 1), 
+        scrap_id = case_when(
+          # Changing the name for the CGH strains
+          scrap_id == "CGH_1" ~ "CGH", 
+          TRUE ~ scrap_id), 
+        original_isolate_id = str_split_i(scrap_id, "_", 1),
+        assembly_type = str_split_i(assembly_file, "\\.", 3)) %>%
+  
+  # keep only the 4 isolates 
+    filter(scrap_id %in% c("BAD", "CFC", "CGH"))
+```
+All these four isolates have the sequence only in the collapsed assembly. We keep the sequences from the collapsed assembly for these four isolates.
+
+```{r}
+# keep the collapsed assemblies for the four isolates 
+blast_results_missing_isolates <- blast_results_raw %>% 
+    rowwise() %>%
+    mutate(
+        
+        # keeps the information about the id of the strain and assembly
+        scrap_id = str_split_i(assembly_file, "\\.", 1), 
+        scrap_id = case_when(
+          # Changing the name for the CGH strains
+          scrap_id == "CGH_1" ~ "CGH",
+          TRUE ~ scrap_id), 
+        original_isolate_id = str_split_i(scrap_id, "_", 1),
+        assembly_type = str_split_i(assembly_file, "\\.", 3)) %>%
+  
+  # keep only the 4 isolates 
+    filter(scrap_id %in% c("BAD", "CFC", "CGH"))
+
+blast_results_missing_isolates
+```
+
+```{r}
+# merge the results
+blast_results_all <- blast_results_clean %>%
+  bind_rows(blast_results_missing_isolates)
+
+blast_results_all
+```
+
+
+# BED FILES
+```{r}
+blast_results_extended <- blast_results_all %>%
+  
+    rowwise() %>%
+  
+    # add the information about the strand
+    mutate(strand = case_when(
+        sstart < send ~ "+", 
+        sstart > send ~ "-")) %>%
+  
+  # concatenate if there are several hits
+  group_by(scrap_id, assembly_file, assembly_type, sseqid, strand) %>%
+  summarise(slen = mean(slen), 
+        number_of_hits = n(), 
+        # add 10 nt before and after the hit
+        start = min(sstart, send) -10, 
+        end = max(sstart, send) +10)
+
+blast_results_extended
+```
+```{r}
+blast_results_extended %>%
+    # checks no hit is at the extremities of the scaffold
+    filter(start == 0 | start == slen | end == 0 | end == slen)
+```
+
+Count the number of sequences retrieved per category of isolate (ploidy x sequencing method)
+```{r}
+blast_results_extended %>%
+  
+  # HP1 and HP2 are grouped
+  mutate(assembly_type = case_when(
+    assembly_type %in% c("HP1", "HP2") ~ "HP1_HP2", 
+    TRUE ~ assembly_type)) %>%
+  
+  # count the number of hits in the assembly of an isolate
+  group_by(scrap_id, assembly_type) %>%
+  summarise(nb_seqs = n()) %>%
+  ungroup() %>%
+  
+  # add the ploidy 
+  full_join(metadata %>% 
+              filter(!artDel_HO) %>%
+              select(scrap_id,  ploidy_OI_corrected), 
+            by = "scrap_id") %>%
+  mutate(assembly_type = case_when(
+           assembly_type == "HP" | assembly_type == "collapsed" ~ paste(assembly_type, ploidy_OI_corrected, sep = "_"), 
+           TRUE ~ assembly_type)) %>%
+  
+  # list the isolates per category
+  group_by(assembly_type) %>%
+  mutate(isolates = paste0(scrap_id, collapse = ", ")) %>%
+  ungroup() %>%
+  group_by(assembly_type, isolates) %>%
+  # count the number of isolates and the number of sequences per category
+  summarise(nb_seqs = sum(nb_seqs), 
+            nb_isolates = n()) %>%
+  ungroup() %>%
+  select(nb_seqs, nb_isolates, assembly_type, isolates)
+```
+
+```{r}
+# write the bed files
+for (assembly in unique(blast_results_extended$assembly_file)) {
+    df <- blast_results_extended %>%
+        ungroup() %>%
+        filter(assembly_file == assembly) %>%
+        mutate(name = "HOcds",
+            score = 0) %>%
+        select(c(sseqid, start, end,name, score, strand)) %>%
+        write_delim(paste0(bed_output_path, assembly, "_to_extract.bed"), delim = "\t" , append = FALSE, col_names = FALSE)
+}
+```

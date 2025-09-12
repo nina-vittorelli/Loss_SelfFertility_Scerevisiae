@@ -1,0 +1,611 @@
+---
+title: "Curation of the ScRAP and the 3,034GP"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+---
+
+# Environment
+
+```{r}
+# restore the environment 
+renv::load()
+renv::restore()
+```
+
+```{r}
+# packages
+library(tidyverse)
+library(readxl)
+library(stringi)
+library(cowplot)
+```
+
+```{r}
+## INPUT
+
+# the supplementary table of the ScRAP paper (O'Donnell, Yue et al. 2023)
+scrap_suptable_path <- "02_data/01_scrap/ScRAP_db.xlsx"
+
+# the results from the script `01_detect_artificial_insertions_in_scrap.sh`
+folder_blast_output <- "03_output/01_cleaned_panels/01_scrap_assemblies_with_markers/"
+
+# the supplementary data for the 1011 Genomes Panel (Peter et al. 2018)
+path_1011_suptable <- "02_data/02_1011Genomes/SupplTables_1011Genomes.xls"
+
+# the supplementary table for the 3034GP (Loegler et al. 2024)
+path_3034_suptable <- "02_data/03_3039GP/Table_S1_G3-2024-405400.xlsx"
+```
+
+```{r}
+## OUTPUT 
+
+# tables
+path_assemblies_with_artificial_deletion_df <- "03_output/tables/supptable2_scrap_assemblies_with_markers.csv"
+
+# figures
+path_plot_type_ploidy_zygosity_scrap <- "03_output/figures/suppfigure_1.pdf"
+path_plot_ploidy_zygosity_3039 <- "03_output/figures/suppfigure_7.pdf"
+
+# intermediary files
+scrap_clean_path <- "03_output/01_cleaned_panels/scrap_clean.csv"
+path_strains_with_HO_deletion_3034GP <- "03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
+df_3039_clean_path <- "03_output/01_cleaned_panels/3039_clean.csv"
+
+# creates the directories for the outputs
+if (!dir.exists("03_output/tables")) {
+  dir.create("03_output/tables", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/figures")) {
+  dir.create("03_output/figures", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/01_cleaned_panels")) {
+  dir.create("03_output/01_cleaned_panels", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/")) {
+  dir.create("03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/", recursive = TRUE, showWarnings = FALSE)
+}
+```
+
+
+```{r}
+# theme for the plot
+myTheme <- function() {
+  theme_classic() +
+    theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.3), 
+          strip.background = element_rect(color = "black", fill = NA, linewidth = 0.3),
+          axis.line = element_line(color = "black",  linewidth = 0.3), 
+          strip.text = element_text(face = "bold"))
+}
+```
+
+
+# ScRAP
+
+This part cures the data from the study of O'Donnell, Yue et al. (2023) in order to use them for further investigations. It requires: 
+
+## Artificial gene disruptions
+
+```{r}
+# import all blast results
+Hyg_blast_df <- read_delim(paste0(folder_blast_output, "_Hyg_scrap_BLAST.csv")) %>%
+  mutate(marker = "HygR", sstart_marker = sstart, send_marker = send) %>%
+  select(c(assembly_file, sseqid, marker, sstart_marker, send_marker))
+Kan_blast_df <- read_delim(paste0(folder_blast_output, "_KanR_scrap_BLAST.csv")) %>%
+  mutate(marker = "KanR", sstart_marker = sstart, send_marker = send) %>%
+  select(c(assembly_file, sseqid, marker, sstart_marker, send_marker))
+Nat1_blast_df <- read_delim(paste0(folder_blast_output, "_Nat1_scrap_BLAST.csv")) %>%
+  mutate(marker = "NatR", sstart_marker = sstart, send_marker = send) %>%
+  select(c(assembly_file, sseqid, marker, sstart_marker, send_marker))
+TEFprom_blast_df <- read_delim(paste0(folder_blast_output, "_TEFpromoterAgossypii_scrap_BLAST.csv")) %>%
+  mutate(TEF_prom = TRUE, sstart_TEFprom = sstart, send_TEFprom = send) %>%
+  select(c(assembly_file, sseqid, sstart_TEFprom, send_TEFprom))
+TEFterm_blast_df <- read_delim(paste0(folder_blast_output, "_TEFterminatorAgossypii_scrap_BLAST.csv")) %>%
+  mutate(TEF_term = TRUE, sstart_TEFterm = sstart, send_TEFterm = send) %>%
+  select(c(assembly_file, sseqid, sstart_TEFterm, send_TEFterm))
+```
+
+Check that the full artificial resistance cassettes are retrieved.
+```{r}
+# all resistant markers
+markers_only_df <- Hyg_blast_df %>%
+  full_join(Kan_blast_df) %>%
+  full_join(Nat1_blast_df) 
+
+# full artificial cassettes 
+artificial_cassettes_df <- full_join(TEFprom_blast_df, markers_only_df) %>%
+  mutate(assembly = paste0(str_split_i(assembly_file, "\\.", 1), ".", str_split_i(assembly_file, "\\.", 3))) %>%
+  full_join(TEFterm_blast_df) %>%
+  select(c(assembly, sseqid, marker, sstart_TEFprom, send_TEFprom, sstart_marker, send_marker, sstart_TEFterm, send_TEFterm)) %>%
+  # check that the promotor/gene/terminator are close to one another
+  mutate(contiguity = ((abs(send_TEFprom - sstart_marker) < 10) &  (abs(send_marker - sstart_TEFterm < 10))) %>% replace_na(FALSE)) 
+
+artificial_cassettes_df %>%
+  arrange(contiguity)
+```
+Manual checks for the two assemblies with putative non-contigous cassettes: 
+
+- The chrIX of CBK contains two artificial deletions (one with KanR and one with HygR resistance). 
+
+- In the RM11 assembly, the cassette is full but the marker has been masked (there is a series of "N" between the TEF's promotor and terminator).
+
+The HO gene is on the chromosome IV, therefore when the deletion is on another chromosome, it does not disrupt HO. 
+
+```{r}
+# table summarizing information about artificial deletion(s) and resistances
+assemblies_with_artificial_deletion_df <- artificial_cassettes_df %>%
+  
+  rowwise() %>%
+  
+  # artificial deletion cassettes markers and positions
+  # solve the issues about CBK and RM11
+  filter(!(assembly == "CBK.HP0" & !contiguity)) %>%
+  mutate(marker = case_when(
+           assembly == "RM11.HP0" ~ "masked", 
+           TRUE ~ marker),
+         # position of the marker 
+         artDel_position = paste(c(min(sstart_TEFprom, send_TEFterm), "-", max(sstart_TEFprom, send_TEFterm)), collapse = " "),
+         
+         # add the information about the isolate
+         isolate = str_split_i(assembly, "\\.", 1)) %>%
+  
+  # detect if there is an artificial deletion of HO in the isolate (i.e. a hit in chrIV)
+  group_by(isolate) %>%
+  mutate(chroms_artDel = paste(unique(sseqid), collapse = " "), 
+         resistance_markers = paste(unique(marker), collapse = " "), 
+         artDel_HO = str_detect(pattern = "chrIV", chroms_artDel)) %>%
+  select(c(isolate, resistance_markers, artDel_HO, assembly, sseqid, artDel_position, marker)) %>%
+  
+  arrange(assembly)
+
+# display
+assemblies_with_artificial_deletion_df
+```
+### Supplementary Table 2
+```{r}
+# save
+write_csv(assemblies_with_artificial_deletion_df, path_assemblies_with_artificial_deletion_df)
+```
+
+
+```{r}
+# table with the isolates whose genome assemblies carry artificial deletion(s)
+isolates_with_artificial_deletion_df <- assemblies_with_artificial_deletion_df %>% 
+  select(c(isolate, resistance_markers, artDel_HO)) %>%
+  unique()
+
+# display
+isolates_with_artificial_deletion_df
+```
+```{r}
+# display the number of isolates that have artificial deletion(s) 
+isolates_with_artificial_deletion_df %>%
+  group_by(artDel_HO) %>%
+  mutate(isolates = paste(unique(isolate), collapse = " ")) %>%
+  group_by(artDel_HO, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  mutate(artificial_deletions = case_when(
+    artDel_HO ~ "in chromosome IV (HO)", 
+    TRUE ~ "in other chromosomes only")) %>%
+  ungroup() %>%
+  select(c(artificial_deletions, nb_isolates, isolates))
+```
+23 strains have been artificially deleted for HO. 2 additional strains (CBK, CBM) have been artificially deleted for genes other than HO only. 
+
+```{r }
+# clean
+remove(artificial_cassettes_df, Hyg_blast_df, Kan_blast_df, markers_only_df, Nat1_blast_df, TEFprom_blast_df, TEFterm_blast_df, assemblies_with_artificial_deletion_df, folder_blast_output, path_assemblies_with_artificial_deletion_df)
+```
+
+## Genome assemblies
+
+```{r}
+# load data
+scrap_assemblies_dirty_df <- read_excel(scrap_suptable_path, sheet = "Supp Table 1", skip = 2)
+```
+
+```{r}
+# clean data
+scrap_assemblies_df <- scrap_assemblies_dirty_df %>% 
+  
+  filter(assembly!="S288C",                         # removing one of the assembly for strain S288C (keeping SGDref)
+         standardized_name != "CGH_3",              # removing one of the assembly for strain CGH (keeping CGH_1)
+         str_detect(assembly, "_HP")==FALSE) %>%    # keep one line per strain (haploid/collapsed)
+  
+  mutate(
+    
+    # scrap_id: id of the isolates that was sequenced
+    scrap_id = case_when(
+       # Changing the name for the CGH strain
+       standardized_name == "CGH_1" ~ "CGH",
+       # For the remaining isolates, the same id is conserved
+       TRUE ~ standardized_name),
+   
+    # some ScRAP strain are monosporic isolates from a diploid parent, that we call the "original isolate". 
+    # original_isolate_id: id of the isolates that was sampled originally
+    original_isolate_id = case_when(
+      # Changing the name fot the CGH strain
+       standardized_name=="CGH_1" ~ "CGH",
+       # For the  strain with a spore id, a column without the spore id was created, which correspond to the original isolate
+       str_detect(standardized_name,"_") ~ str_remove_all(standardized_name, "_[:alnum:]*"),
+       # For the remaining strains, the same id is conserved
+       TRUE ~ standardized_name), 
+    
+    # in this file, the ploidy indicated is the one of the scrap isolate, not the original isolate
+    ploidy_scrap_isolate = ploidy,
+    
+    # information about the sequencing / assembling methods in the ScRAP study
+    project = factor(project), # whether the sequencing and assembling steps were done in the ScRAP study
+    sequenced_as = factor(sequenced_as)) %>% # which ploidy level was used for assembling (e.g., homozygous diploids and polyploids were sequenced as haploid)
+  
+  select(c(scrap_id, original_isolate_id, ploidy_scrap_isolate, project, sequenced_as))
+
+scrap_assemblies_df
+```  
+
+```{r}
+# number of isolates per sequencing & assembling method
+scrap_assemblies_df %>%
+  group_by(project) %>%
+  summarise(nb_isolates = n()) 
+```  
+
+```{r}
+# merge with the table about the artificial deletions
+scrap_assemblies_clean_df <- full_join(scrap_assemblies_df, isolates_with_artificial_deletion_df, 
+                                       by = join_by(scrap_id == isolate)) %>%
+  mutate(artDel = !is.na(artDel_HO), 
+         artDel_HO = case_when(
+           is.na(artDel_HO) ~ FALSE, 
+           TRUE ~ artDel_HO)
+         ) %>%
+  select(scrap_id, original_isolate_id, ploidy_scrap_isolate, project, sequenced_as, artDel, artDel_HO, resistance_markers)
+
+scrap_assemblies_clean_df
+```  
+
+```{r}
+# cleaning
+remove(scrap_assemblies_dirty_df, scrap_assemblies_df, isolates_with_artificial_deletion_df)
+```  
+
+## Origins and genomic features of the isolates
+
+```{r}
+scrap_origins_dirty_df <- read_excel(scrap_suptable_path, sheet = "Supp Table 2", skip = 2)  
+scrap_origins_dirty_df
+```
+```{r}
+scrap_origins_df <- scrap_origins_dirty_df  %>% 
+  
+  mutate(
+    original_isolate_id = case_when( 
+      # For S288C, we keep the id "S288C"
+      Standardized_name=="S288C/SGDref" ~ "SGDref",
+      # For the remaining isolates, the same id is conserved
+      TRUE ~ Standardized_name), 
+
+    isolation           = str_remove_all(Isolation, ",") %>% str_replace_all("_"," "),
+    ecological_origin   = str_remove_all(Ecological_origin, ",") %>% str_replace_all("_"," "),
+    ecology             = as.factor(`D/W/H/L`) ,
+    geographical_origin = str_remove_all(Geographical_origin, ",") %>% str_replace_all("_"," "), 
+    country             = str_remove_all(Country, ",") %>% str_replace_all("_"," "),
+    continent           = str_remove_all(Continent,",") %>% str_replace_all("_"," "),
+    phylogenetic_clade  = str_remove_all(Phylogenetic_clade, ",") %>% str_replace_all("_"," "),
+    
+    # the ploidy indicated here is the one of the original isolate (OI), i.e, the isolate that was sampled
+    ploidy_OI           = as.numeric(str_remove(Ploidy,"n")), 
+    zygosity            = as.factor(Zygosity),
+    genomic_features    = Additional_information) %>%
+  
+  select(c(original_isolate_id,
+           isolation,ecological_origin,ecology,
+           geographical_origin,country,continent,phylogenetic_clade,
+           ploidy_OI,zygosity,HO_deletion,genomic_features)) %>%
+  arrange(original_isolate_id)
+
+# display the nice table
+scrap_origins_df
+```
+
+```{r}
+# create a dataframe containing the information on origin x assembly x blast
+scrap_df <- scrap_origins_df %>%
+  full_join(scrap_assemblies_clean_df, by = "original_isolate_id")
+
+scrap_df
+```
+
+### Check for artificial deletion
+```{r}
+# comparison between the metadata annotation and the result from the blast in the genome assembly
+scrap_df %>%
+  rowwise() %>%
+  mutate(Kan_resistant = str_detect(resistance_markers, "KanR") %>% replace_na(FALSE)) %>%
+  group_by(artDel_HO, HO_deletion, Kan_resistant) %>%
+  mutate(isolates = paste(unique(scrap_id), collapse = " ")) %>%
+  group_by(artDel_HO, HO_deletion, Kan_resistant, isolates) %>%
+  summarise(n=n()) %>%
+  mutate(coherence = case_when(
+    HO_deletion == "ho::KanMX" & artDel_HO & Kan_resistant ~ "coherent", 
+    HO_deletion == "no" & !artDel_HO ~ "coherent",
+    TRUE ~ "incoherent")) %>%
+  select(c(coherence, HO_deletion, artDel_HO, Kan_resistant, n, isolates)) %>%
+  arrange(coherence)
+```
+For 5 isolates, the metadata indicates a disruption of HO with a KanMX insertion, but there is another disruption cassette (HygMX) in their genome assembly. For 13 isolates, the metadata indicates no disruption of HO but we observe an artificial HO disruption in their genome assembly. These inconsistencies have no consequences on our analyses, because we will remove all the isolates for which we detected an artificial HO deletion in the assembly, whether it was indicated or not in the metadata. 
+
+For 7 isolates, the metadata indicates a disruption of HO with a KanMX insertion but there is no sign of artificial HO disruption in their genome assembly. These isolates likely have their original allele of HO. We will keep them for further analyses. However, because they were thought to be ho::KanMX, they were all considered as haploid isolates in the metadata. This ploidy is dubious. We tested the ploidy of 4 of them by flow cytometry (CDA and ACA are haploids, AAB and AFI are diploids).
+For the 3 other strains, the ploidy is set to unknown. Additionnaly, we correct their genome-wide zygosity to set it to NA, as for all haploids, because a haploid cannot be homozygous or heterozygous. 
+
+```{r}
+# correct the dataframe
+scrap_df_corrected <- scrap_df %>%
+  ungroup() %>%
+  mutate(
+    
+    # correct the ploidy as described before
+    ploidy_OI_corrected = case_when(
+      scrap_id %in% c("CDA", "ACA") ~ 1, # tested by flow cytometry
+      scrap_id %in% c("AAB", "AFI") ~ 2, # tested by flow cytometry
+      HO_deletion == "ho::KanMX" & !artDel_HO ~ NA, 
+      TRUE ~ ploidy_OI), 
+    
+    # correct the ploidy as described before
+    ploidy_scrap_isolate_corrected = case_when(
+      scrap_id %in% c("CDA", "ACA") ~ 1, # tested by flow cytometry
+      scrap_id %in% c("AAB", "AFI") ~ 2, # tested by flow cytometry
+      HO_deletion == "ho::KanMX" & !artDel_HO ~ NA, 
+      TRUE ~ ploidy_scrap_isolate), 
+    
+    # a haploid isolate cannot be homozygous or heterozygous
+    zygosity_OI_corrected = case_when(
+      ploidy_OI_corrected == 1  ~ NA,
+      is.na(ploidy_OI_corrected) ~ NA, 
+      HO_deletion == "ho::KanMX" ~ NA,
+      TRUE ~ zygosity)) 
+
+# display
+scrap_df_corrected
+```
+
+
+```{r}
+# de novo sequenced and assembled isolates
+scrap_df_corrected %>%
+  filter(project == "de novo sequenced and assembled", 
+         !artDel_HO) %>%
+  select(c(original_isolate_id, ploidy_OI_corrected, sequenced_as, scrap_id, ploidy_scrap_isolate_corrected)) %>%
+  group_by(ploidy_OI_corrected, sequenced_as, ploidy_scrap_isolate_corrected) %>%
+  mutate(original_isolates = paste(original_isolate_id, collapse = " "), 
+         scrap_isolates = paste(scrap_id, collapse = " ")) %>%
+  group_by(ploidy_OI_corrected, sequenced_as, ploidy_scrap_isolate_corrected, original_isolates, scrap_isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(ploidy_OI_corrected, sequenced_as, ploidy_scrap_isolate_corrected, nb_isolates, original_isolates, scrap_isolates))
+```
+
+In the 87 isolates that were sequenced and assembled in ScRAP, there are 
+
+- 3 isolates with unknown ploidy;
+
+- 4 original haploid isolates;  
+
+- 22 original diploid isolates, among which 2 were sequenced as haploid because they were thought to be ho::KanMX even if they are not;
+
+- 45 monosporic isolates - i.e. isolates that were produced from the single spore of a diploid isolate - among which, 12 are annotated as haploid and 33 are annotated as diploid; 
+
+- 6 original triploid isolates; 
+
+- 7 original tetraploid isolates.
+
+
+```{r}
+# other isolates
+scrap_df_corrected %>%
+  filter(project != "de novo sequenced and assembled", 
+         !artDel_HO) %>%
+  select(c(original_isolate_id, ploidy_OI_corrected, sequenced_as, scrap_id, ploidy_scrap_isolate_corrected)) %>%
+  group_by(ploidy_OI_corrected, sequenced_as, ploidy_scrap_isolate_corrected) %>%
+  mutate(original_isolates = paste(original_isolate_id, collapse = " "), 
+         scrap_isolates = paste(scrap_id, collapse = " ")) %>%
+  group_by(ploidy_OI_corrected, sequenced_as, ploidy_scrap_isolate_corrected, original_isolates, scrap_isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(ploidy_OI_corrected,  sequenced_as, ploidy_scrap_isolate_corrected, nb_isolates, original_isolates, scrap_isolates))
+```
+
+In the 30 isolates that were sequenced (and sometimes assembled) in previous studies, there are: 
+
+- 7 haploid isolates; 
+
+- 13 diploid isolates; 
+
+- 10 monosporic isolates, among which 9 diploid isolates and 1 haploid isolates. However, for these monosporic isolates, the parent (original isolate) and its monosporic isolate seems to share the same id. Additionally, the parent of monosporic isolates are supposed to be diploid, but here the parent of HLJ1 is haploid. For all these reasons, we will consider the 10 monosporic isolates as original diploid isolates for BJ4, EM14S013B, HN1, JXXY161, SX2, UWOPS034614, XXYS14, Y55, and with unknown ploidy for HLJ1 and SK1. 
+
+
+```{r}
+# other round of correction
+scrap_df_corrected_2 <- scrap_df_corrected %>%
+  
+  # remove strains with artificial deletion
+  filter(!artDel_HO) %>%
+  
+  ungroup() %>%
+  mutate(
+    
+    # correct the ploidy as described before
+    ploidy_OI_corrected = case_when(
+      scrap_id %in% c("HLJ1", "SK1") ~ NA, 
+      TRUE ~ ploidy_OI_corrected), 
+    
+    # correct the ploidy as described before
+    ploidy_scrap_isolate_corrected = case_when(
+      scrap_id %in% c("HLJ1", "SK1") ~ NA, 
+      TRUE ~ ploidy_scrap_isolate_corrected), 
+    
+    # considered as monosporic isolate in the experimental screen ?
+    sequenced_as_corrected = case_when(
+      project == "de novo sequenced and assembled" & sequenced_as == "monosporic" ~ "monosporic_scrap", 
+      project != "de novo sequenced and assembled" & sequenced_as == "monosporic" ~ "monosporic_else", 
+      TRUE ~ sequenced_as),
+    
+    sequencing_category = case_when(
+      sequenced_as_corrected == "monosporic_scrap" ~ "monosporic", 
+      TRUE ~ "original"), 
+    
+    # a haploid isolate cannot be homozygous or heterozygous
+    zygosity_OI_corrected = case_when(
+      ploidy_OI_corrected == 1  ~ NA,
+      is.na(ploidy_OI_corrected) ~ NA, 
+      TRUE ~ zygosity_OI_corrected)) 
+
+# display
+scrap_df_corrected
+```
+
+```{r}
+# display data
+scrap_df_corrected_2 %>% 
+  select(c(original_isolate_id, ploidy_OI_corrected, sequenced_as_corrected, scrap_id, ploidy_scrap_isolate_corrected)) %>%
+  group_by(ploidy_OI_corrected, sequenced_as_corrected, ploidy_scrap_isolate_corrected) %>%
+  mutate(original_isolates = paste(original_isolate_id, collapse = " "), 
+         scrap_isolates = paste(scrap_id, collapse = " ")) %>%
+  group_by(ploidy_OI_corrected, sequenced_as_corrected, ploidy_scrap_isolate_corrected, original_isolates, scrap_isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(ploidy_OI_corrected,  sequenced_as_corrected, ploidy_scrap_isolate_corrected, nb_isolates, original_isolates, scrap_isolates))
+```
+
+```{r}
+plot_type_ploidy_scrap <- ggplot(scrap_df_corrected_2) +
+  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)))) +
+  facet_grid(sequencing_category ~ . ) +
+  geom_text(stat = "count", size=4, color = "grey30", aes(factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), label = ..count..), nudge_y = 3) +
+  myTheme() +
+  labs( x = "ploidy", y = "number of strains")
+
+plot_type_ploidy_scrap
+```
+### Supplementary Figure 1
+```{r}
+plot_type_ploidy_zygosity_scrap <- ggplot(scrap_df_corrected_2 %>%
+         mutate(sequencing_category = case_when(
+             sequencing_category == "monosporic" ~ "45 monosporic isolates", 
+             TRUE ~ "72 original strains"))) +
+  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), 
+           fill = zygosity_OI_corrected)) +
+  facet_grid(sequencing_category ~ . ) +
+  geom_text(stat = "count", size=4, color = "grey30", aes(factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), label = ..count..), nudge_y = 3) +
+  scale_fill_manual(values = c("heterozygous"= "#E69F00", "homozygous"="#112299"), na.value = "grey70") +
+  myTheme() +
+  labs( x = "ploidy", y = "number of strains", fill = "original isolate's zygosity")
+
+
+plot_type_ploidy_zygosity_scrap
+
+ggsave(filename = path_plot_type_ploidy_zygosity_scrap, plot_type_ploidy_zygosity_scrap,  height = 5, width = 7)
+```
+
+```{r}
+# save the clean database
+write_csv(scrap_df_corrected_2, scrap_clean_path)
+
+```
+
+```{r}
+remove(scrap_assemblies_clean_df, scrap_df, scrap_df_corrected, scrap_df_corrected_2, plot_type_ploidy_zygosity_scrap, scrap_origins_df, scrap_origins_dirty_df, scrap_suptable_path, scrap_clean_path)
+```
+
+# 3034GP
+
+## Artificial HO deletion in the 1011 Genomes 
+
+```{r}
+# import the file
+df_1011 <- read_excel(path_1011_suptable, 
+  sheet = 1, 
+  skip = 3, 
+  n_max = 1011)
+```
+
+```{r}
+# strains with artificial deletion
+strains_with_HO_deletion <- df_1011$`Standardized name`[df_1011$`HO deletion` == "yes"]
+length(strains_with_HO_deletion)
+
+writeLines(strains_with_HO_deletion, path_strains_with_HO_deletion_3034GP)
+```
+
+```{r}
+remove(df_1011, path_1011_suptable, path_strains_with_HO_deletion_3034GP)
+```
+
+## Genomic features of the 3039 strains
+
+```{r}
+# load data
+df_3039_raw <- read_excel(
+  path_3034_suptable, 
+  sheet = 1, 
+  skip = 2)
+
+# number of strains
+nrow(df_3039_raw)
+```
+```{r}
+# remove 
+df_3039 <- df_3039_raw  %>%
+  filter(!(StandardizedName %in% strains_with_HO_deletion)) %>%
+  
+  # put all undefined ploidy to NA
+  mutate(Ploidy = case_when(
+    Ploidy  == "?" | Ploidy == "NA" ~ NA, 
+    TRUE ~ Ploidy), 
+    
+    # no zygosity in haploids
+    Zygosity = case_when(
+      Ploidy == "1" ~ NA, 
+      TRUE ~ Zygosity
+    ))
+
+# number of strains
+nrow(df_3039)
+```
+
+
+```{r}
+plot_ploidy_3039 <- ggplot(df_3039) +
+  geom_bar(aes(x = factor(Ploidy,levels = c("1", "2", "3", "4", "5")))) +
+  geom_text(stat = "count", size=4, color = "grey30", 
+            aes(x = factor(Ploidy, levels = c("1", "2", "3", "4", "5")), 
+                label = ..count..),
+            nudge_y = 50) +
+  myTheme() +
+  labs(x = "ploidy", y = "number of strains") 
+
+plot_ploidy_3039
+```
+
+```{r}
+# save the clean database
+write_csv(df_3039, df_3039_clean_path)
+```
+
+### Supplementary Figure 7
+```{r}
+plot_ploidy_zygosity_3039 <- ggplot(df_3039) +
+  geom_bar(aes(x = factor(Ploidy,levels = c("1", "2", "3", "4", "5")), 
+               fill = Zygosity)) +
+  geom_text(stat = "count", size=4, color = "grey30", 
+            aes(x = factor(Ploidy, levels = c("1", "2", "3", "4", "5")), 
+                label = ..count..),
+            nudge_y = 50) +
+  scale_fill_manual(values = c("Heterozygous"= "#E69F00", "Homozygous"="#112299"), na.value = "grey70") +
+  myTheme() +
+  labs( x = "ploidy", y = "number of strains", fill = "zygosity") 
+
+plot_ploidy_zygosity_3039
+
+ggsave(filename = path_plot_ploidy_zygosity_3039, plot_ploidy_zygosity_3039,  height = 5, width = 7)
+```

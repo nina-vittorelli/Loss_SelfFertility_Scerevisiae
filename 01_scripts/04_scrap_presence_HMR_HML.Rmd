@@ -1,0 +1,440 @@
+---
+title: "Presence of the cassettes and MAT in ScRAP assemblies"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+---
+
+# Environment
+
+```{r}
+# environment 
+renv::load()
+renv::restore()
+```
+
+```{r}
+# Packages
+library(tidyverse)
+```
+
+```{r}
+## INPUT
+
+# results from script 03_detect_MAT_HML_HMR.sh
+blast_result_path <- "03_output/02_MAT_HMR_HML/_merged_BLAST.csv"
+
+# results from script 02_clean_panels.Rmd
+path_scrap_db <- "03_output/01_cleaned_panels/scrap_clean.csv"
+```
+
+```{r}
+## OUTPUT 
+
+# intermediary files
+scrap_HMR_HML_MAT_table_path <- "03_output/02_MAT_HMR_HML/scrap_HMR_HML_MAT_presence_storedY.csv"
+
+# creates the directories for the outputs
+if (!dir.exists("03_output/02_MAT_HMR_HML/")) {
+  dir.create("03_output/02_MAT_HMR_HML/", recursive = TRUE, showWarnings = FALSE)
+}
+
+```
+
+
+```{r}
+# plot
+myTheme <- function() {
+  theme_classic() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      strip.background = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      strip.text = element_text(face = "bold")
+    )
+}
+```
+
+
+
+#  Load data
+
+## Metadata
+```{r}
+scrap_df <- read_csv(path_scrap_db)
+```
+## Blast results
+
+```{r}
+blast_result <- read_delim(blast_result_path)
+```
+
+```{r}
+blast_df <- blast_result %>% 
+  rowwise() %>%
+  mutate(assembly_file = str_replace(assembly_file, "CGH_1", "CGH"),
+        
+          # keeps the information about the strain and the spore
+          scrap_id = str_split_i(assembly_file, "\\.", 1), 
+         # keeps the information about the name of the strain 
+          original_isolate_id = str_split_i(scrap_id, "_", 1),
+          # keeps the information about the assembling method
+          assembly_type = str_split_i(assembly_file, "\\.", 3), 
+          
+          assembly = paste(scrap_id, assembly_type, sep = "."), 
+         
+          qseqid = str_split_i(qseqid, "::", 1) %>% str_remove("_REGION")) %>%
+  
+  # remove the strain with artificial deletion in ChrIV
+  filter(scrap_id %in% scrap_df$scrap_id, 
+         # removes S288C assembly (redundant with SGDref)
+         scrap_id != "S288C",
+         # keep only phased assemblies
+         assembly_type != "collapsed")
+
+
+blast_df %>%
+  select(assembly, sseqid, slen, qseqid, qlen, length, pident, mismatch, gapopen, qstart, pident, sstart, send)
+```
+
+# Count the number of loci
+```{r}
+presence_flanking_genes <- blast_df %>%
+  group_by(assembly, assembly_type, sseqid, qseqid) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = qseqid, values_from = n, values_fill = 0) %>%
+  mutate(
+    # VBA3 (YCL069W) and CHA1 (YCL064C) surround HMLalpha.
+    flanking_HML = VBA3 * CHA1 == 1,
+    # PHO87 (YCR037C) and TAF2 (YCR042C) surround MAT (a or alpha).
+    flanking_MAT = PHO87 * TAF2 == 1,
+    # CDC50 (YCR094W) and GIT1 (YCR098C) surround HMRa.
+    flanking_HMR = CDC50 * GIT1 == 1
+  )
+
+presence_flanking_genes
+```
+```{r}
+# look for the presence of the locus
+presence <- presence_flanking_genes %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_HML = sum(flanking_HML), 
+            nb_HMR = sum(flanking_HMR), 
+            nb_MAT = sum(flanking_MAT)) %>%
+  full_join(scrap_df) %>%
+  
+  # expected number of loci depends on the ploidy and assembling method
+  mutate(expected_nb_HML_HMR_MAT = case_when(
+         is.na(ploidy_OI_corrected) | zygosity_OI_corrected == "homozygous" | sequenced_as_corrected == "haploid" | sequenced_as_corrected == "monosporic_scrap" ~ 1,
+         sequenced_as_corrected == "diploid" ~ 2, 
+         sequenced_as_corrected == "triploid" ~ 3,
+         sequenced_as_corrected == "tetraploid" ~ 4), 
+         
+         nb_HML_cat = case_when( 
+           nb_HML == 0 ~ "none", 
+           nb_HML < expected_nb_HML_HMR_MAT ~ "less than expected", 
+           nb_HML == expected_nb_HML_HMR_MAT ~ "expected", 
+           nb_HML > expected_nb_HML_HMR_MAT ~ "more than expected"), 
+         
+         nb_HMR_cat = case_when( 
+           nb_HMR == 0 ~ "none", 
+           nb_HMR < expected_nb_HML_HMR_MAT ~ "less than expected", 
+           nb_HMR == expected_nb_HML_HMR_MAT ~ "expected", 
+           nb_HML > expected_nb_HML_HMR_MAT ~ "more than expected"), 
+         
+         nb_MAT_cat = case_when( 
+           nb_MAT == 0 ~ "none", 
+           nb_MAT < expected_nb_HML_HMR_MAT ~ "less than expected", 
+           nb_MAT == expected_nb_HML_HMR_MAT ~ "expected", 
+           nb_MAT > expected_nb_HML_HMR_MAT ~ "more than expected")) %>%
+  
+  select(scrap_id, expected_nb_HML_HMR_MAT, contains("HML"), contains("HMR"), contains("MAT"))
+  
+presence
+```
+```{r}
+# number of sequences
+presence  %>%
+  ungroup() %>%
+  select(nb_HML, nb_HMR, nb_MAT) %>%
+  summarise(nb_HML_tot = sum(nb_HML), 
+            nb_HMR_tot = sum(nb_HMR),
+            nb_MAT_tot = sum(nb_MAT))
+```
+We found 121 HML sequences, 112 HMR sequences and 153 MAT sequences.
+
+## HML
+```{r}
+presence  %>%
+  ungroup() %>%
+  group_by(nb_HML_cat) %>%
+  mutate(strains = paste(scrap_id %>% sort(), collapse = ", ") ) %>%
+  group_by(nb_HML_cat, strains) %>%
+  summarise(nb_strains = n()) %>%
+  select(nb_strains, nb_HML_cat, strains) 
+```
+
+We find the expected number of HML loci in 92 isolates, no HML locus at all in 15 isolates, for the remaining 10 isolates, some HML loci are found but less than expected given their ploidy. The missing loci can be due to technical noise or biological signal. 
+
+```{r}
+# which strains have no HML locus? 
+ presence_flanking_genes %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_HML = sum(flanking_HML)) %>%
+  filter(nb_HML == 0) %>%
+  select(scrap_id) %>%
+  left_join(scrap_df) %>%
+  select(scrap_id, ploidy_scrap_isolate_corrected) %>%
+  unique() %>%
+  arrange(ploidy_scrap_isolate_corrected)
+```
+## HMR
+```{r}
+presence  %>%
+  ungroup() %>%
+  group_by(nb_HMR_cat) %>%
+  mutate(strains = paste(scrap_id %>% sort(), collapse = ", ") ) %>%
+  group_by(nb_HMR_cat, strains) %>%
+  summarise(nb_strains = n()) %>%
+  select(nb_strains, nb_HMR_cat, strains) 
+```
+
+We find the expected number of HMR loci in 90 isolates, no HMR locus at all in 17 isolates, for the remaining 10 isolates, some HMR loci are found but less than expected given their ploidy. The missing loci can be due to technical noise or biological signal.
+
+```{r}
+# which strains have no HMR locus? 
+ presence_flanking_genes %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_HMR = sum(flanking_HMR)) %>%
+  filter(nb_HMR == 0) %>%
+  select(scrap_id) %>%
+  left_join(scrap_df) %>%
+  select(scrap_id, ploidy_scrap_isolate_corrected) %>%
+  unique() %>%
+  arrange(ploidy_scrap_isolate_corrected)
+```
+
+## MAT
+```{r}
+presence  %>%
+  ungroup() %>%
+  group_by(nb_MAT_cat) %>%
+  mutate(strains = paste(scrap_id %>% sort(), collapse = ", ") ) %>%
+  group_by(nb_MAT_cat, strains) %>%
+  summarise(nb_strains = n()) %>%
+  select(nb_strains, nb_MAT_cat, strains) 
+```
+
+We find the expected number of MAT loci in 105 isolates, no MAT locus at all in 5 isolates, for the remaining 7 isolates, some MAT loci are found but not the expected number given their ploidy (6 have less than expected and 1 more than expected). The missing/additional loci can be due to technical noise or biological signal. 
+
+```{r}
+# which strains have no MAT locus? 
+ presence_flanking_genes %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_MAT = sum(flanking_MAT)) %>%
+  filter(nb_MAT == 0) %>%
+  select(scrap_id) %>%
+  left_join(scrap_df) %>%
+  select(scrap_id, ploidy_scrap_isolate_corrected) %>%
+  unique() %>%
+  arrange(ploidy_scrap_isolate_corrected)
+```
+
+
+# Which Y sequence is present in each locus?
+
+## HML
+### Result per assembly
+```{r}
+HML_cassettes <- presence_flanking_genes %>%
+  filter(flanking_HML) %>%
+  
+  left_join(blast_df) %>%
+  filter(qseqid %in% c("VBA3", "CHA1")) %>%
+  group_by(assembly, sseqid) %>%
+  summarise(up = max(sstart, send), 
+         down =  min(sstart, send), 
+         len = up - down) %>%
+  ungroup() %>%
+  select(assembly, sseqid, up, down, len) %>%
+  
+  left_join(blast_df) %>%
+  filter(
+    sstart <= up, send <= up, 
+    sstart >= down, send >= down,
+    qseqid %in% c("X", "Ya", "Yalpha", "Z1")) %>%
+  select(assembly, sseqid, up, down, qseqid) %>%
+  
+  group_by(assembly, sseqid, qseqid) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  pivot_wider(names_from = qseqid, values_from = n, values_fill = 0) %>%
+  mutate(HML_full_cassette = (X & Z1), 
+         HML_stored_sequence = case_when(
+           Ya & !Yalpha ~ "a", 
+           !Ya & Yalpha ~ "alpha",
+           TRUE ~"to_check")) 
+
+HML_cassettes
+
+HML_cassettes %>%
+  group_by(HML_full_cassette, HML_stored_sequence) %>%
+  summarise(n = n())
+```
+We observe that the cassette is always present, but sometimes there is Ya instead of Yalpha which is stored.
+
+### Results per strain
+```{r}
+HML_cassettes_per_strain <- HML_cassettes %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_HML_full_cassettes = sum(HML_full_cassette), 
+            nb_HMLa = sum(HML_stored_sequence == "a"), 
+            nb_HMLalpha = sum(HML_stored_sequence == "alpha"))
+
+HML_cassettes_per_strain
+```
+
+### Which assembly/strain carry the Ya sequence in HML?
+```{r}
+HML_cassettes %>% 
+  filter(HML_stored_sequence == "a") %>%
+  group_by(assembly, HML_stored_sequence) %>%
+  summarise(n = n()) %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1))
+
+strains_with_HMLa <- unique(HML_cassettes$scrap_id)
+```
+
+## HMR
+### Result per assembly
+```{r}
+HMR_cassettes <- presence_flanking_genes %>%
+  filter(flanking_HMR) %>%
+  
+  left_join(blast_df) %>%
+  filter(qseqid %in% c("CDC50", "GIT1")) %>%
+  group_by(assembly, sseqid) %>%
+  summarise(up = max(sstart, send), 
+         down =  min(sstart, send), 
+         len = up - down) %>%
+  ungroup() %>%
+  select(assembly, sseqid, up, down, len) %>%
+  
+  left_join(blast_df) %>%
+  filter(
+    sstart <= up, send <= up, 
+    sstart >= down, send >= down,
+    qseqid %in% c("X", "Ya", "Yalpha", "Z1")) %>%
+  select(assembly, sseqid, up, down, qseqid) %>%
+  
+  group_by(assembly, sseqid, qseqid) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  pivot_wider(names_from = qseqid, values_from = n, values_fill = 0) %>%
+  mutate(HMR_full_cassette = (X & Z1), 
+         HMR_stored_sequence = case_when(
+           Ya == 1 ~ "a", 
+           TRUE ~"to_check")) 
+
+HMR_cassettes
+
+HMR_cassettes %>%
+  group_by(HMR_full_cassette, HMR_stored_sequence) %>%
+  summarise(n = n())
+```
+
+```{r}
+HMR_cassettes %>% 
+  filter(!HMR_full_cassette)
+```
+
+BJ4 seems to have a deletion in the HMR cassette. 
+
+### Results per strain
+```{r}
+HMR_cassettes_per_strain <- HMR_cassettes %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_HMR_full_cassettes = sum(HMR_full_cassette), 
+            nb_HMRa = sum(HMR_stored_sequence == "a"), 
+            nb_HMRalpha = sum(HMR_stored_sequence == "alpha"))
+
+HMR_cassettes_per_strain
+```
+
+
+## MAT
+### Result per assembly
+```{r}
+MAT_locus <- presence_flanking_genes %>%
+  filter(flanking_MAT) %>%
+  
+  left_join(blast_df) %>%
+  filter(qseqid %in% c("PHO87", "TAF2")) %>%
+  group_by(assembly, sseqid) %>%
+  summarise(up = max(sstart, send), 
+         down =  min(sstart, send), 
+         len = up - down) %>%
+  ungroup() %>%
+  select(assembly, sseqid, up, down, len) %>%
+  
+  left_join(blast_df) %>%
+  filter(
+    sstart <= up, send <= up, 
+    sstart >= down, send >= down,
+    qseqid %in% c("X", "Ya", "Yalpha", "Z1")) %>%
+  select(assembly, sseqid, up, down, qseqid) %>%
+  
+  group_by(assembly, sseqid, qseqid) %>%
+  summarise(n = n()) %>%
+  ungroup() %>%
+  pivot_wider(names_from = qseqid, values_from = n, values_fill = 0) %>%
+  mutate(MAT_full_locus = (X & Z1), 
+         MAT_stored_sequence = case_when(
+           Ya & !Yalpha ~ "a", 
+           !Ya & Yalpha ~ "alpha",
+           TRUE ~ "else") ) 
+
+MAT_locus
+
+MAT_locus %>%
+  group_by(MAT_full_locus, MAT_stored_sequence) %>%
+  summarise(n = n())
+```
+ We observe that in 1 case, we have incomplete MAT locus (Y55) and in 7 cases, we have unclear stored sequence. It can be an artifact due to the construction of a single consensus haploid sequence even if the strain is actually heterozygous for this locus. 
+
+```{r}
+MAT_locus %>%
+  filter(MAT_stored_sequence == "else")
+```
+
+### Results per strain
+```{r}
+MAT_locus_per_strain <- MAT_locus %>%
+  mutate(scrap_id = str_split_i(assembly, "\\.", 1)) %>%
+  group_by(scrap_id) %>%
+  summarise(nb_MAT_full_cassettes = sum(MAT_full_locus), 
+            nb_MATa = sum(MAT_stored_sequence == "a"), 
+            nb_MATalpha = sum(MAT_stored_sequence == "alpha"))
+
+MAT_locus_per_strain
+```
+
+```{r}
+table_to_store <- presence %>%
+  left_join(HML_cassettes_per_strain) %>% 
+  left_join(HMR_cassettes_per_strain) %>%
+  left_join(MAT_locus_per_strain) %>%
+  select(scrap_id, expected_nb_HML_HMR_MAT, contains("HML"), contains("HMR"), contains("MAT")) %>%
+  mutate(across(where(is.numeric), ~ replace_na(., 0)))
+
+table_to_store
+write_csv(table_to_store, scrap_HMR_HML_MAT_table_path)
+```

@@ -1,0 +1,8 @@
+.DS_Store
+.Rhistory
+.RData
+.Rproj.user/
+.Rproj.user
+01_scripts/*.nb.html
+.Ruserdata
+__pycache__/

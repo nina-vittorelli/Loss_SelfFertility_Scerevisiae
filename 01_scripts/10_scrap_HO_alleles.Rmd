@@ -1,0 +1,1469 @@
+---
+title: "Functional analysis of HO variants in ScRAP"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+---
+
+# Environment
+
+```{r}
+# environment 
+renv::load()
+renv::restore()
+```
+
+```{r}
+# Packages
+library(tidyverse)
+library(patchwork)
+library(combinat) 
+library(cowplot)
+library(ggtree)
+library(ape)
+library(grid)
+library(magick)
+```
+
+
+```{r}
+## INPUT
+
+# scrap metadata
+path_scrap_db <- "03_output/01_cleaned_panels/scrap_clean.csv"
+
+# scrap phylogenetic tree
+scrap_tree_path <- "02_data/01_scrap/scrap_tree.tre"
+
+# scrap results from previous analyses
+path_MAT_HMR_HML <- "03_output/02_MAT_HMR_HML/scrap_HMR_HML_MAT_presence_storedY.csv"
+path_scrap_reproduction <- "03_output/03_experimental_screen/scrap_thallism_from_screen.csv"
+path_complementation_results <- "03_output/04_complementation_assay/complementation_results.csv"
+
+# HO variants in scrap
+table_variants_cds_Scrap_path <- "03_output/05_HO_sequences_scrap/HO_variants_pHS2_vs_scrap.csv"
+
+# figure edited manually 
+fig2D_path <- "02_data/06_figures/HO_network_annotated.pdf"
+```
+
+```{r}
+## OUTPUT 
+
+# tables
+table_variants_HO_path <- "03_output/tables/supptable3_scrap_HO_variants.csv"
+supptable_1_path <- "03_output/tables/supptable1_117_scrap.csv"
+
+# figures
+fig2_path <- "03_output/figures/figure_2.pdf"
+suppfig3_path <- "03_output/figures/suppfigure_3.pdf"
+suppfig4_path <- "03_output/figures/suppfigure_4.pdf"
+suppfig5_path <- "03_output/figures/suppfigure_5.pdf"
+
+# intermediary files
+neutral_variants_path <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral_variants.txt"
+
+# creates the directories for the outputs
+if (!dir.exists("03_output/tables")) {
+  dir.create("03_output/tables", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/figures")) {
+  dir.create("03_output/figures", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/05_HO_sequences_scrap/")) {
+  dir.create("03_output/05_HO_sequences_scrap/", recursive = TRUE, showWarnings = FALSE)
+}
+
+```
+
+```{r}
+myTheme <- function() {
+  theme_classic() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      strip.background = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      strip.text = element_text(face = "bold")
+    )
+}
+```
+
+# Define categories of HO alleles based on their isolates' behavior
+
+## Load data about ScRAP isolates
+
+```{r}
+# load metadata
+metadata_db <- read_delim(path_scrap_db) 
+
+# load results from experiments
+scrap_MAT_HMR_HML <- read_delim(path_MAT_HMR_HML)
+scrap_reproduction <- read_delim(path_scrap_reproduction) # screen 
+scrap_complementation <- read_delim(path_complementation_results) # complementation
+```
+
+```{r}
+scrap_df <- metadata_db %>%
+  # combine data
+  left_join(scrap_MAT_HMR_HML) %>%
+  left_join(scrap_reproduction) %>%
+  left_join(scrap_complementation) %>%
+  
+  mutate(
+    # HO functionality
+    HO_functionality_experiment = case_when(
+    # non functional HO identified in the complementation test
+    !is.na(HO_functionality) ~ HO_functionality, 
+    # functional HO that are present in a homothallic isolate
+    thallism == "homothallic" ~ "functional", 
+    TRUE ~ "unknown"))  %>%
+  
+  select(-HO_functionality)
+  
+# display numbers
+scrap_df %>%
+  group_by(HO_functionality_experiment, thallism) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0)
+```
+
+```{r}
+# store the isolates depending on the experimental test for the functionality of their HO allele
+isolates_with_functional_HO_experiment <- scrap_df$scrap_id[scrap_df$HO_functionality_experiment == "functional"]
+isolates_with_nonfunctional_HO_experiment <- scrap_df$scrap_id[scrap_df$HO_functionality_experiment == "nonfunctional"]
+heterothallic_isolates <- scrap_df$scrap_id[scrap_df$thallism == "heterothallic"]
+```
+
+```{r}
+# clean
+remove(metadata_db, path_complementation_results, path_scrap_db, path_scrap_reproduction, path_MAT_HMR_HML, scrap_complementation, scrap_reproduction, scrap_MAT_HMR_HML)
+```
+
+# Variants
+
+## Load data
+
+```{r}
+# load raw tables of variants
+table_variants_raw <- read_delim(table_variants_cds_Scrap_path) %>% 
+  
+  # change names of the columns
+  pivot_longer(contains(c("HP", "collapsed"))) %>%
+  mutate(name = paste0(str_split_i(name, "-", 1), "-", str_split_i(name, "-", 2))) %>%
+  pivot_wider(names_from = name, values_from = value)
+```
+
+## Frequency and position of the variants
+
+Let us count the number of occurrences of each variant
+```{r}
+table_variants_count <- table_variants_raw  %>%
+  rowwise() %>%
+  # counts the number of occurrences of the variations
+  mutate(nbOcc = sum(c_across(contains(c("HP", "collapsed"))))) 
+```
+
+```{r}
+ggplot(table_variants_count %>%
+         mutate(nbOcc_fig = case_when(nbOcc > 40 ~ 40, TRUE ~ nbOcc))) +
+  geom_histogram(aes(x = nbOcc_fig), bins = 40) +
+  annotate("label", label = paste(nrow(table_variants_count), "variants"), x = 35, y = 43) +
+  scale_x_continuous(breaks = seq(from = 0, to = 40, by = 10), labels = c("0", "10", "20", "30", "40+")) +
+  labs(title = "Variants compared to the pHS2 allele",
+       y = "number of variants", 
+       x = "number of occurrences in ScRAP") +
+  myTheme()
+```
+
+```{r}
+# clean
+remove(table_variants_raw)
+```
+
+## Effect on the translated sequence 
+
+```{r}
+table_variants_cds <- table_variants_count %>%
+  rowwise() %>%
+  
+  mutate( 
+    # create a comprehensible id for the figures
+    id_var = case_when(
+      type == "SNP" ~ paste(pos_ref, ref_nt,  ">", alt_nt, sep=""), 
+      type == "INS" ~ paste(pos_ref, as.character(size), sep = ": ") %>% paste("bp ins.", sep = " "), 
+      type == "DEL" ~ paste(pos_ref, as.character(size), sep = ": ") %>% paste("bp del.", sep = " "),
+      TRUE ~ NA), 
+    
+    # create a single variable for the effect of the allele on the translated sequence
+    effect_translated_sequence = case_when(
+      loss_start_codon ~ "start codon loss", 
+      nonsense_SNP ~ "nonsense", 
+      missense_SNP ~ "missense", 
+      synonymous_SNP ~ "synonymous", 
+      in_frame_indel_between_codons & type == "DEL" ~ "in-frame deletion", 
+      in_frame_indel_between_codons & type == "INS" ~ "in-frame insertion", 
+      in_frame_indel_within_codon ~"in_frame_indel_within_codon", 
+      frameshift ~ "frameshift"), 
+    
+    effect_translated_sequence = factor(effect_translated_sequence, levels = c("synonymous", "missense", "in-frame deletion", "in-frame insertion", "in_frame_indel_within_codon", "nonsense", "frameshift","start codon loss" ))) %>%
+  
+  select(id_var, pos_ref, ref_nt, alt_nt, pos_codon, pos_in_codon, ref_codon, ref_amino_acid, alt_codon, alt_amino_acid, nbOcc, effect_translated_sequence, contains(c("HP", "collapsed"))) %>%
+  arrange(pos_ref)
+```
+
+```{r}
+table_variants_cds %>% 
+  group_by(effect_translated_sequence) %>%
+  summarise(n = n()) 
+```
+
+```{r}
+ggplot(table_variants_cds) +
+  geom_bar(aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "nonsense", "in-frame deletion", "frameshift",  "start codon loss")))) +
+  geom_text(stat = "count", size=2.5, color = "grey30", aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "nonsense", "in-frame deletion", "frameshift",  "start codon loss")), label = paste0("n=",..count..)), nudge_y = 4) +
+  labs(title = "Variants compared to the pHS2 allele",
+      subtitle = "Effect on the translated sequence",
+    x = " ",  
+    y = "Number of variants") +
+  myTheme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+```
+```{r}
+label_data <- table_variants_cds %>%
+  group_by(effect_translated_sequence) %>%
+  summarise(total = n()) %>%
+  mutate(label = paste0("n = ", total))
+
+ggplot(table_variants_cds %>%
+         mutate(nbOcc_fig = case_when(nbOcc > 40 ~ 40, TRUE ~ nbOcc))) +
+  geom_histogram(aes(x = nbOcc_fig), bins = 40) +
+    geom_label(data = label_data,
+            aes(x = 40, y = Inf, label = label),
+            hjust = 1.1, vjust = 1.5,
+            inherit.aes = FALSE, 
+            size = 3) +
+  scale_x_continuous(breaks = seq(from = 0, to = 40, by = 10), labels = c("0", "10", "20", "30", "40+")) +
+  facet_wrap(vars(factor(effect_translated_sequence, levels =  c("synonymous", "missense", "nonsense", "in-frame deletion", "frameshift",  "start codon loss")))) +
+  labs(title = "Variants compared to the pHS2 allele",
+       y = "number of variants", 
+       x = "number of occurrences in ScRAP") +
+  myTheme() 
+
+remove(label_data)
+```
+
+```{r}
+ggplot(table_variants_cds %>%
+         mutate(nbOcc_fig = case_when(nbOcc > 40 ~ 40, TRUE ~ nbOcc))) +
+  geom_point(aes(x = pos_ref, y = nbOcc_fig, shape = effect_translated_sequence), size = 0.8) +
+    scale_y_continuous(breaks = seq(from = 0, to = 40, by = 10), labels = c("0", "10", "20", "30", "40+")) +
+  scale_shape_manual(values =  c("synonymous" = 4,
+                                 "missense"= 8, 
+                                 "nonsense"= 22, 
+                                 "in-frame deletion"=23,
+                                 "frameshift"=24, 
+                                 "start codon loss"=25)) +
+  labs(title = "Variants compared to the pHS2 allele",
+    x = "Position",  
+    y = "Number of occurrences in ScRAP", 
+    shape = "effect on the translated sequence") +
+  myTheme()
+
+```
+
+```{r}
+# clean 
+remove(table_variants_count)
+```
+
+### Check for multiple mutations in the same codon
+
+One thing to check is that we do not have two SNPs in the same codon
+that have non-additive effect. For instance:
+
+\- reference codon: CGA -\> Arginine
+
+\- mutation 3A-\>T: CGT -\> Arginine
+
+\- mutation 1A-\>C: AGA -\> Arginine
+
+\- double mutation 3A-\>T & 1A-\>C: AGT -\> Serine
+
+```{r}
+table_codons_with_multiple_variations <- table_variants_cds %>% 
+  group_by(pos_codon, pos_in_codon) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = pos_in_codon, 
+              values_from = n, 
+              values_fill = 0) %>%
+  mutate(total = `1` + `2` + `3`) %>%
+  select(c(pos_codon, `1`, `2`, `3`, total)) %>%
+  
+  # remove the codons with a single variation
+  filter(total > 1, 
+         # or with variations only at the same nt position (they cannot co-occur)
+         (`1`+`2`)*(`1`+`3`)*(`2`+`3`) != 0)
+
+print(paste("There are", as.character(nrow(table_codons_with_multiple_variations)), "codons with polymorphisms at several positions."))
+
+table_codons_with_multiple_variations
+codons_with_multiple_variations <- table_codons_with_multiple_variations$pos_codon
+```
+
+Let us investigate if these double mutations sometimes occur
+simultaneously in the same sequence.
+
+```{r}
+table_codons_with_multiple_variations_in_the_same_allele <- table_variants_cds %>%
+  filter(pos_codon %in% codons_with_multiple_variations) %>%
+  pivot_longer(cols = -c(id_var, pos_ref, ref_nt, alt_nt, pos_codon, pos_in_codon, ref_codon, ref_amino_acid, alt_codon, alt_amino_acid, nbOcc, effect_translated_sequence), names_to = "assemblies", values_to = "var_presence") %>%
+  filter(var_presence > 0) %>% 
+  group_by(assemblies, pos_codon) %>%
+  summarise(n = n()) %>%
+  filter(n>1)
+
+table_codons_with_multiple_variations_in_the_same_allele
+codons_with_multiple_variations_in_the_same_allele <- table_codons_with_multiple_variations_in_the_same_allele$pos_codon
+seq_with_codons_with_multiple_variations_in_the_same_allele <- table_codons_with_multiple_variations_in_the_same_allele$assemblies
+
+print(paste("There are", as.character(length(codons_with_multiple_variations_in_the_same_allele)), "codon(s) with polymorphisms at several positions in the same sequence."))
+```
+
+```{r}
+# clean
+remove(codons_with_multiple_variations, codons_with_multiple_variations_in_the_same_allele, table_codons_with_multiple_variations, table_codons_with_multiple_variations_in_the_same_allele, seq_with_codons_with_multiple_variations_in_the_same_allele, table_variants_cds_Scrap_path)
+```
+
+## Effect on the functionality
+
+The effect of a variant on functionality is defined as follow: 
+
+First, we use the data from the experimental screen:
+- If it is in a functional allele of HO: neutral
+- If it is the only non-neutral variant of a rescued heterothallic isolates: LoF
+
+We add information about the effect on the translated sequence 
+- If it is synonymous: neutral
+- If it causes frameshift, anticipated stop codon or loss start codon: LoF
+
+We also add information from the literature:
+- identification of LoF variants (Ekino 1999)
+- identification of neutral variants (Ekino 1999)
+- identification of important motifs, variants in these regions are LoF (Bakhrat 2004)
+
+```{r}
+table_variants_funct <- table_variants_cds %>% 
+  
+  rowwise() %>%
+  
+  mutate(
+    # counts the number of occurrences of the variations
+    nbOcc_functSeqs = sum(c_across(starts_with(isolates_with_functional_HO_experiment))),
+    nbOcc_nonfunctSeqs = sum(c_across(starts_with(isolates_with_nonfunctional_HO_experiment))), 
+    
+    # based on the experimental screen
+    effect_functionality_experiment = case_when(
+      nbOcc_functSeqs > 0 ~ "neutral",
+      TRUE ~ "unknown"), 
+    
+    # based on the effect on the translated sequence
+    effect_functionality_effect_cds = case_when(
+      effect_translated_sequence == "synonymous" ~ "neutral",
+      effect_translated_sequence %in% c("start codon loss", "nonsense", "frameshift") ~ "LoF",
+      TRUE ~ "unknown"), 
+    
+    # based on the literature
+      # Ekino 1999
+    effect_functionality_Ekino = case_when(
+      effect_translated_sequence == "synonymous" ~ "unknown",
+      pos_ref == 565 & alt_nt == "G" ~ "neutral", 
+      pos_ref == 667 & alt_nt == "A" ~ "LoF",
+      pos_ref == 1214 & alt_nt == "C" ~ "neutral",
+      pos_ref == 1424 & alt_nt == "T" ~ "neutral",
+      pos_ref == 1588 & alt_nt == "A" ~ "neutral",
+      TRUE ~ "unknown"), 
+    
+      # Bakhrat 2004
+    motif = case_when(
+      pos_codon >= 216 & pos_codon <= 223 ~ "1st LAGLIDADG", 
+      pos_codon >= 325 & pos_codon <= 333 ~ "2nd LAGLIDADG",
+      pos_codon >= 466 & pos_codon <= 469 ~ "Zf1a", 
+      pos_codon >= 486 & pos_codon <= 489 ~ "Zf1b", 
+      pos_codon >= 508 & pos_codon <= 511 ~ "Zf2a", 
+      pos_codon >= 522 & pos_codon <= 525 ~ "Zf2b",
+      pos_codon >= 558 & pos_codon <= 561 ~ "Zf3a", 
+      pos_codon >= 574 & pos_codon <= 577 ~ "Zf3b (not essential)", 
+      TRUE ~ NA), 
+    effect_functionality_Bakhrat = case_when(
+      effect_translated_sequence == "synonymous" ~ "unknown",
+      pos_codon %in% c(99, 286, 333, 417) ~ "LoF", 
+      motif %in% c("1st LAGLIDADG", "2nd LAGLIDADG") ~ "LoF", 
+      pos_codon %in% c(466, 469, 508, 511, 558, 561) ~ "LoF",
+      TRUE ~ "unknown"), 
+    
+    # combine all information 
+    effect_functionality = case_when(
+      effect_functionality_experiment != "unknown" ~ effect_functionality_experiment,
+      effect_functionality_effect_cds != "unknown" ~ effect_functionality_effect_cds, 
+      effect_functionality_Ekino != "unknown" ~ effect_functionality_Ekino, 
+      effect_functionality_Bakhrat != "unknown" ~ effect_functionality_Bakhrat, 
+      TRUE ~ "unknown"))
+```
+
+Look at cases with a single non-neutral variant in a rescued heterothallic isolate.
+
+```{r}
+table_variants_funct %>%
+  filter(effect_functionality != "neutral") %>%
+  select(id_var, contains(c("HP", "collapsed"))) %>%
+  pivot_longer(cols = contains(c("HP", "collapsed")), names_to = "seq", values_to = "presence") %>%
+  group_by(seq) %>%
+  mutate(nb_noneutral = sum(presence)) %>%
+  ungroup() %>%
+  mutate(strain = str_split_i(seq, "\\.", 1)) %>%
+  filter(strain %in% isolates_with_nonfunctional_HO_experiment, 
+         nb_noneutral == 1,
+         presence > 0) 
+```
+
+The only variant is 667G>A and it is already considered as LoF because it was identified as LoF in Ekino 1999
+
+```{r}
+# summarise the different methods to estimate the effect of the variant
+table_variants_funct %>%
+  group_by(effect_functionality_experiment, effect_functionality_effect_cds, effect_functionality_Ekino, effect_functionality_Bakhrat, effect_functionality) %>%
+  summarise(n = n()) %>%
+  select(n, effect_functionality, effect_functionality_experiment, effect_functionality_effect_cds, effect_functionality_Ekino, effect_functionality_Bakhrat)
+```
+```{r}
+# different types of variants
+table_variants_funct %>%
+  group_by(effect_functionality) %>%
+  summarise(n = n()) 
+```
+```{r}
+ggplot(table_variants_funct) +
+  geom_bar(aes(x = factor(effect_functionality, levels =  c("LoF",  "unknown", "neutral")), fill = effect_functionality)) +
+  geom_text(aes(x = factor(effect_functionality, levels =  c("LoF",  "unknown", "neutral")), label = paste0("n=",..count..)), stat = "count", size=2.5, color = "grey30", nudge_y = 4) +
+  scale_fill_manual(values = c("LoF"="#612288", "unknown"="#DDCC77", "neutral"= "#88CCEE")) +
+  labs(title = "Variants compared to the pHS2 allele",
+       subtitle = "Effect on functionality",
+    x = " ",  
+    y = "Number of variants") +
+  myTheme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        legend.position = "none")
+```
+### Figure 2A
+```{r}
+var_cds_funct <- ggplot(table_variants_funct) +
+  geom_bar(aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "in-frame deletion", "nonsense",  "frameshift",  "start codon loss")), fill = effect_functionality ))  +
+  geom_text(stat = "count", size=2.5, color = "grey30", aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense","in-frame deletion", "nonsense",  "frameshift", "start codon loss")), label = paste0("n=",..count..)), nudge_y = 4) +
+  scale_fill_manual(values = c("LoF"="#612288", "unknown"="#DDCC77", "neutral"= "#88CCEE"))+
+  labs(
+    x = " ",  
+    y = "number of HO variants", 
+    fill = "effect on functionality") +
+  myTheme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        legend.position = c(0.7, 0.6))
+
+
+var_cds_funct + 
+  labs(title = "Variants compared to the pHS2 allele")
+```
+
+### Supplementary Figure 3A
+```{r}
+var_freq_funct <- ggplot(table_variants_funct %>%
+         mutate(nbOcc_fig = case_when(nbOcc > 40 ~ 40, TRUE ~ nbOcc))) + 
+  geom_histogram(aes(x = nbOcc_fig, fill = effect_functionality), bins = 40) +
+  scale_x_continuous(breaks = seq(from = 0, to = 40, by = 10), labels = c("0", "10", "20", "30", "40+")) +
+  scale_fill_manual(values =  c("LoF"="#612288", "unknown"="#DDCC77", "neutral"= "#88CCEE")) +
+  labs(y = "number of variants", x = "number of occurrences in ScRAP", fill = "effect on functionality") +
+  myTheme() 
+
+var_freq_funct + 
+  labs(title = "Variants compared to the pHS2 allele")
+```
+### Supplementary Figure 3B
+```{r}
+var_cds_freq_funct_pos <- ggplot(table_variants_funct %>%
+         mutate(nbOcc_fig = case_when(nbOcc > 30 ~ 30, TRUE ~ nbOcc))) +
+  geom_point(aes(x = pos_ref, y = nbOcc_fig, shape = effect_translated_sequence, fill = effect_functionality, color = effect_functionality), size = 1) +
+    scale_y_continuous(breaks = seq(from = 0, to = 30, by = 10), labels = c("0", "10", "20", "30+")) +
+  scale_fill_manual(values =  c("LoF"="#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  scale_color_manual(values =  c("LoF"="#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  scale_shape_manual(values =  c("synonymous" = 4,
+                                 "missense"= 8, 
+                                 "nonsense"= 22, 
+                                 "in-frame deletion"=23,
+                                 "frameshift"=24, 
+                                 "start codon loss"=25)) +
+  guides(fill = "none") +
+  labs(x = "position",  y = "number of occurrences in ScRAP", shape = "type", col = "effect on functionality") +
+  myTheme()
+
+var_cds_freq_funct_pos +
+  labs(title = "Variants compared to the pHS2 allele")
+```
+### Supplementary Figure 3
+```{r}
+suppfig3 <- plot_grid(var_freq_funct, var_cds_freq_funct_pos, labels = c("A", "B"), rel_heights = c(1, 1.5), ncol = 1)
+
+suppfig3
+
+ggsave(suppfig3_path, height = 6, width = 8)
+
+remove(suppfig3)
+```
+
+```{r}
+remove(table_variants_cds, var_cds_freq_funct_pos, var_freq_funct)
+```
+
+### Supplementary table 3
+```{r}
+table_variants_funct %>%
+  select(
+    "pos_ref", "ref_nt", "alt_nt", "pos_codon", "pos_in_codon", "ref_codon", "ref_amino_acid", "alt_codon", "alt_amino_acid", "effect_translated_sequence", "nbOcc", "nbOcc_functSeqs", "nbOcc_nonfunctSeqs", "motif", "effect_functionality", contains(c("HP", "collapsed"))) %>%
+  write_csv(table_variants_HO_path)
+```
+
+## Store variants according to their effect
+```{r}
+# all variants, ordered
+table_variants_funct <- table_variants_funct %>% arrange(pos_ref)
+variants_all = table_variants_funct$id_var
+length(variants_all)
+```
+
+```{r}
+# non-synonymous variants, ordered
+table_variants_funct <- table_variants_funct %>% arrange(pos_ref)
+variants_nonsynonymous <- table_variants_funct$id_var[table_variants_funct$effect_translated_sequence != "synonymous"]
+
+length(variants_nonsynonymous)
+```
+
+```{r}
+# variants that are present in functional alleles
+variants_neutral <- table_variants_funct$id_var[table_variants_funct$effect_functionality == "neutral"]
+
+length(variants_neutral)
+
+# save for future use
+writeLines(variants_neutral, neutral_variants_path)
+```
+
+```{r}
+# variants that are not neutral, ordered
+variants_putEffFunct <- variants_nonsynonymous[!(variants_nonsynonymous %in% variants_neutral)]
+
+length(variants_putEffFunct)
+```
+
+```{r}
+# variants LoF
+variants_LoF <- table_variants_funct$id_var[table_variants_funct$effect_functionality == "LoF"]
+
+length(variants_LoF)
+```
+
+```{r}
+# variants present in at least 10 sequences
+table_variants_funct %>% 
+  filter(nbOcc > 9) %>%
+  select(id_var, effect_functionality, effect_translated_sequence) %>%
+  arrange(effect_functionality)
+```
+
+
+# Alleles
+
+```{r}
+# all the sequences id
+seqs_all <- table_variants_funct %>% 
+  select(contains(c("HP", "collapsed"))) %>% 
+  colnames()
+
+length(seqs_all)
+```
+
+## Infer the functionality of the alleles
+
+Functionality: for each allele, 
+• If it contains only neutral variants: functional
+• If it contains at least one LoF variant: non-functional
+• If present in a complemented heterothallic isolate: non-functional
+• Else: unknown functionality
+
+```{r}
+table_alleles <- table_variants_funct %>%
+  
+  # keep only id and presence in the different sequences 
+  select(c("id_var", seqs_all)) %>%
+  
+  # one line per sequence
+  pivot_longer(cols = -id_var, names_to = "sequence_id", values_to = "value") %>%
+  pivot_wider(names_from = id_var, values_from = value) %>%
+  select(sequence_id, all_of(variants_all)) %>%
+  
+  # create a column "allele" containing the combination of variants
+  rowwise() %>%
+  mutate(allele = paste0(c_across(variants_all), collapse = ""), 
+         
+         # count the number of variants
+         nb_variants = sum(c_across(variants_all)), 
+         nb_variants_LoF = sum(c_across(variants_LoF)), 
+         nb_variants_putEffFunct = sum(c_across(variants_putEffFunct)),
+         nb_variants_neutral = sum(c_across(variants_neutral)),
+         
+         # functionality based on the variants
+         predicted_functionality_from_variants = case_when(
+           nb_variants_LoF > 0 ~ "non-functional", 
+           nb_variants == nb_variants_neutral ~ "functional",
+           TRUE ~ "undetermined")) %>%
+
+  # group by allele for the following analyses
+  ungroup() %>%
+  group_by(allele) %>%
+  
+  # which sequences have this allele?
+  mutate(sequences = paste(unlist(sequence_id), collapse = ", "),
+         # total number of sequences with this allele
+           nb_sequences = n(), 
+           
+           # number of sequences with this allele depending on the experiment
+           nb_sequences_functionalHO = sum(str_split_i(sequence_id, "\\.", 1) %in% isolates_with_functional_HO_experiment), 
+           nb_sequences_nonfunctionalHO = sum(str_split_i(sequence_id, "\\.", 1) %in% isolates_with_nonfunctional_HO_experiment),
+           nb_sequences_unknownHO_heterothallics = sum(str_split_i(sequence_id, "\\.", 1) %in% heterothallic_isolates) -  nb_sequences_nonfunctionalHO, 
+           nb_sequences_unknownthallism = nb_sequences - nb_sequences_functionalHO - nb_sequences_nonfunctionalHO - nb_sequences_unknownHO_heterothallics, 
+         
+          # number of isolates
+    isolates = paste(str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("\\.", 1) %>% unique() %>% sort(), collapse = ", "),
+    number_isolates = str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("\\.", 1) %>% unique() %>% length(),
+         
+         # functionality based on the isolates carrying this alleles 
+         predicted_functionality_from_isolates = case_when(
+           nb_sequences_functionalHO > 0 ~ "functional",
+           nb_sequences_nonfunctionalHO > 0 ~ "non-functional",
+           TRUE ~ "undetermined"), 
+         
+         # functionality 
+         predicted_functionality = case_when(
+           predicted_functionality_from_variants == predicted_functionality_from_isolates ~ predicted_functionality_from_variants,
+           predicted_functionality_from_variants != "undetermined" ~ predicted_functionality_from_variants, 
+           predicted_functionality_from_isolates != "undetermined" ~ predicted_functionality_from_isolates) %>% factor(levels = c("undetermined", "non-functional", "functional")))   %>%
+
+  # remove the id of the sequences
+  select(-sequence_id) %>%
+  
+  # one line per allele
+  unique() %>%
+  ungroup() %>%
+  group_by(predicted_functionality, nb_variants_LoF, nb_variants_putEffFunct) %>%
+  arrange(nb_variants, .by_group = TRUE) %>%
+  ungroup() %>%
+  mutate(id = row_number() %>% factor())
+
+table_alleles %>% select(id, predicted_functionality, nb_variants, nb_variants_LoF, nb_variants_neutral, nb_variants_putEffFunct, nb_sequences, nb_sequences_functionalHO, nb_sequences_nonfunctionalHO, nb_sequences_unknownHO_heterothallics, nb_sequences_unknownthallism, sequences,  predicted_functionality_from_isolates, predicted_functionality_from_variants,isolates, number_isolates, allele)
+```
+
+```{r}
+table_alleles %>%
+  group_by(predicted_functionality, predicted_functionality_from_isolates, predicted_functionality_from_variants) %>%
+  summarise(nb_of_alleles = n())
+```
+### Summary of the number of allele per functionality
+```{r}
+table_alleles_sumup_functionality <-  table_alleles %>%
+  
+  # group by predicted functionality
+  group_by(predicted_functionality) %>%
+  
+  # count the number of alleles
+  mutate(total_number_alleles = n(),
+  
+    # count the number of sequences
+    total_number_sequences = sum(nb_sequences),
+    total_sequences = paste(sequences %>% sort(), collapse = ", "),
+    
+    # count the number of isolates
+    total_isolates = paste(str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("\\.", 1) %>% unique() %>% sort(), collapse = ", "),
+    total_number_isolates = str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("\\.", 1) %>% unique() %>% length()) %>%
+  
+  # keep only useful columns
+  select(predicted_functionality, total_number_alleles, total_number_sequences, total_number_isolates, total_sequences, total_isolates) %>%
+  unique() %>%
+  arrange(predicted_functionality) 
+
+table_alleles_sumup_functionality
+```  
+
+### Supplementary Figure 4A
+```{r}
+p_allele_nb_variants <- ggplot(table_alleles) +
+  geom_col(aes(x=nb_variants, y = id, fill="neutral")) +
+  geom_col(aes(x=nb_variants_putEffFunct, y = id, fill="unknown")) +
+  geom_col(aes(x=nb_variants_LoF, y = id, fill="LoF")) +
+  facet_grid(predicted_functionality %>% factor(levels = c("functional", "non-functional", "undetermined")) ~ ., scales = "free_y", space = "free_y" ) +
+  scale_fill_manual(name = "effect on functionality",values = c("LoF"="#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  myTheme() +
+  theme(legend.position = c(.95, .9),  
+    legend.justification = c(1, 1), 
+    axis.ticks.y = element_blank(), 
+    axis.text.y = element_blank(), 
+    strip.text = element_text(size = 8)
+    ) +
+  labs(x = "number of variants", 
+       y = "alleles") 
+
+p_allele_nb_variants
+```
+
+### Supplementary Figure 4B
+```{r}
+p_allele_frequency_seq <- ggplot(table_alleles) +
+  geom_histogram(aes(x = nb_sequences, fill = factor(predicted_functionality, levels = c("undetermined", "non-functional", "functional"))), bins = 2*max(table_alleles$nb_sequences +1)) +
+  scale_fill_manual(values = c("functional" = "#c2f9c9" , "non-functional" = "#661100", "undetermined" = "gray90")) +
+  xlim(0,max(table_alleles$nb_sequences)+1) +
+  myTheme() +
+  theme(legend.position = c(.9, .9),  
+    legend.justification = c(1, 1)) +
+  labs(x = "number of sequences", 
+       y = "number of alleles",
+       fill = "predicted functionality")
+
+p_allele_frequency_seq
+```
+### Supplementary Figure 4C
+```{r}
+p_allele_frequency_isolates <- ggplot(table_alleles) +
+  geom_histogram(aes(x = number_isolates, fill = factor(predicted_functionality, levels = c("undetermined", "non-functional", "functional"))), bins = 2*max(table_alleles$number_isolates+1)) +
+  scale_fill_manual(values = c("functional" = "#c2f9c9" , "non-functional" = "#661100", "undetermined" = "gray90")) +
+  xlim(0,max(table_alleles$number_isolates)+1) +
+  myTheme() +
+  theme(legend.position = c(.9, .9),  
+    legend.justification = c(1, 1)) +
+  labs(x = "number of isolates", 
+       y = "number of alleles",
+       fill = "predicted functionality")
+
+p_allele_frequency_isolates
+```
+
+### Supplementary Figure 4
+
+```{r}
+suppfig4down <- plot_grid(p_allele_frequency_seq, p_allele_frequency_isolates, labels = c("B", "C"),  ncol = 2)
+
+suppfig4 <- plot_grid(p_allele_nb_variants, suppfig4down, labels = c("A", ""),  ncol = 1, rel_heights = c(1, 0.6))
+
+ggsave(suppfig4_path, height = 10, width = 8)
+
+remove(suppfig4down, suppfig3)
+```
+
+```{r}
+# clean
+remove(suppfig4, suppfig4_path, p_allele_frequency_seq, p_allele_frequency_isolates, p_allele_nb_variants)
+```
+
+## Focus on non-functional alleles
+
+### Keep non-functional alleles and non-neutral variants
+```{r}
+table_nonfunct_alleles = table_alleles %>%
+  
+  # keep only non-functional alleles
+  filter(predicted_functionality == "non-functional") %>%
+  
+  # keep only non-neutral variants
+  select(all_of(variants_putEffFunct)) %>%
+  
+  # group alleles with the same combination of non-neutral variants
+  #unique() %>%
+  
+  # order by variants
+   arrange(`236T>A`) %>%
+    arrange(`1731T>A`) %>%
+    arrange(`1153G>T`) %>%
+    arrange(`530G>C`) %>%
+    arrange(`1564: 108 bp del.`) %>%
+    arrange(`667G>A`) %>%
+    arrange(`668G>A`) %>%
+  
+  mutate(id_allele = row_number())
+
+table_nonfunct_alleles
+```
+
+
+## Count the minimal number of variants that LoF the protein function to explain that all the sequences are nonfunctional
+
+Creates a matrix 
+```{r}
+nonfunctional_alleles_matrix <- table_nonfunct_alleles %>% 
+  select(id_allele, variants_putEffFunct) 
+
+nonfunctional_alleles_matrix
+```
+
+```{r eval=FALSE, include=FALSE}
+find_minimal_sets <- function(df){
+  
+  # I. Reduce the table using the single variants
+  print("I. Reduce the table using the alleles with a single variant")
+  
+  # 1. Select the rows with a single variants
+  oneToOne_table <- df %>%
+    mutate(n = rowSums(across(-id_allele))) %>%
+    filter(n == 1) %>%
+    select(-n) %>%
+    pivot_longer(cols = -id_allele) %>%
+    mutate(name = as.character(name)) %>%
+    filter(value > 0)
+  
+  print(paste("Identification of", as.character(nrow(oneToOne_table)), "alleles with a single variant:"))
+  
+  variants_from_oneToOne <- oneToOne_table$name
+  print(paste(variants_from_oneToOne, collapse = ", "))
+  
+  # 2. Remove all the allele carrying these variants
+  table_allele_with_oneToOne_variants <- df %>% 
+    select(id_allele, variants_from_oneToOne) %>%
+    mutate(n = rowSums(across(-id_allele))) %>%
+    filter(n > 0)
+  alleles_from_oneToOne <- as.character(table_allele_with_oneToOne_variants$id_allele)
+  
+  print(paste("Identification of", as.character(length(alleles_from_oneToOne)), "alleles carrying these variants."))
+  
+  # 3. Remove all the variants that are not in the remaining alleles
+  remaining_table <- df %>%
+    filter(!(id_allele %in% alleles_from_oneToOne)) %>%
+    pivot_longer(-id_allele) %>%
+    filter(value > 0) %>%
+    pivot_wider(names_from = name, values_from = value, values_fill = 0)
+  
+  # creates a matrix
+  mat <- as.matrix(remaining_table[ , -1])
+  n <- nrow(mat)
+  m <- ncol(mat)
+  col_names <- colnames(mat)
+  
+  # II. Find Mmax with a greedy algorithm
+  print("II. Find Mmax with a greedy algorithm")
+  
+  # initialise
+  uncovered_rows <- 1:n
+  selected_cols <- c()
+  
+  while(length(uncovered_rows) > 0) {
+    # Count 1's in uncovered rows per column
+    counts <- colSums(mat[uncovered_rows, , drop=FALSE])
+    # Pick column with max count
+    best_col <- which.max(counts)
+    selected_cols <- c(selected_cols, best_col)
+    
+    # Remove rows covered by this column
+    covered_rows <- which(mat[, best_col] == 1)
+    uncovered_rows <- setdiff(uncovered_rows, covered_rows)
+  }
+
+  Mmax <- length(selected_cols)
+  print(paste("Upper bound Mmax = ", as.character(Mmax)))
+  
+  # III. Find Mmin
+  print("III. Find Mmin by looking for smaller sets")
+  
+    # Define a helper function to check if a set of columns covers all rows
+  covers_all_rows <- function(cols, mat, n) {
+    covered_rows <- which(rowSums(mat[, cols, drop=FALSE]) > 0)
+    return(length(covered_rows) == n)
+  }
+  
+  # initialization
+  M <- Mmax - 1
+  reach_min <- FALSE
+  
+  while(reach_min == FALSE & M > 0 ){
+    
+    print(paste("Checking subsets of size ", as.character(M)))
+    
+    # Filter combos that cover all rows
+    set_exists <- FALSE
+    combinations <- combn(m, M, simplify = FALSE)
+    
+    for (combo in combinations) {
+      if (covers_all_rows(cols = combo, mat = mat, n = n)){
+        print(paste("Found a subset of size ", as.character(M)))
+        set_exists <- TRUE
+        M <- M-1
+        break}
+    }
+    
+    if(set_exists == FALSE){
+      reach_min <- TRUE
+      print(paste("No subset of size ", as.character(M)))
+      Mmin <- M + 1
+      print(paste("Minimal subset size", as.character(Mmin)))
+    } 
+  }
+  
+  # IV. All possible sets with Mmin columns
+  print("IV. Find all possible sets")
+  combinations <- combn(m, Mmin, simplify = FALSE)
+  
+  # Filter combos that cover all rows
+  valid_sets <- list()
+  for (combo in combinations) {
+    if (covers_all_rows(cols = combo, mat = mat, n = n) == TRUE) {
+      valid_sets[[length(valid_sets) + 1]] <- combo
+     }
+    }
+  
+  print(paste("Minimal number of invalidating variants: ", as.character(length(variants_from_oneToOne) + Mmin)))
+  print(paste("Number of possible sets:",  as.character(length(valid_sets))))
+  
+  # Convert column indices to names
+  all_sets <- lapply(valid_sets, function(x) c(variants_from_oneToOne, col_names[x]))
+
+  return(all_sets)
+}
+```
+
+```{r eval=FALSE, include=FALSE}
+all_sets <- find_minimal_sets(nonfunctional_alleles_matrix)
+```
+
+```{r eval=FALSE, include=FALSE}
+# Find which are the variants in this set
+sorted_list <- lapply(all_sets, sort)
+
+df_raw <- do.call(rbind, sorted_list) %>% as.data.frame(stringsAsFactors = FALSE)
+colnames(df_raw) <- paste0("var_", 1:13)
+
+# plot the frequency of each variant is all the possible minimal sets
+df_raw %>% 
+  unique() %>%
+  mutate(comb_id = paste0("combo_", row_number())) %>%
+  pivot_longer(-comb_id, values_to = "var") %>%
+  select(-name) %>%
+  mutate(presence = 1) %>%
+  pivot_wider(names_from =comb_id, values_from = presence, values_fill = 0) %>%
+  rowwise() %>%
+  mutate(frequency_in_all_minimal_sets = round(sum(c_across(starts_with("combo_"))) / 192, 2)) %>%
+  select(var, frequency_in_all_minimal_sets) %>%
+  arrange(desc(frequency_in_all_minimal_sets))
+
+# clean
+remove(sorted_list, df_raw)
+```
+
+
+### Figure 2B
+
+```{r}
+# keep only nonfunctional alleles
+table_nonfunct_alleles_for_plot = table_nonfunct_alleles %>%
+  # keep only non-neutral variants
+  pivot_longer(cols = all_of(variants_putEffFunct), names_to = "id_var", values_to = "presence") %>%
+  # information about the functionality of the variants
+  left_join(table_variants_funct %>% select(id_var, effect_functionality))
+
+plot_var <- ggplot(table_nonfunct_alleles_for_plot) +
+  geom_tile(aes(x = id_var %>% factor(levels = variants_putEffFunct), y = id_allele %>% as_factor(), fill = effect_functionality, alpha = as.factor(presence))) +
+  scale_fill_manual(values = c("LoF"="#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  scale_alpha_manual(values = c(`1`= 1, `0`= 0)) +
+  scale_x_discrete(position = "bottom") +
+  myTheme() +
+    theme(axis.title.x = element_text(vjust = 10),
+      #axis.ticks.y = element_blank(),
+      panel.grid.major = element_line(color = "grey70", linewidth = .1), 
+      panel.grid.minor = element_line(color = "grey70", linewidth = .1), 
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+    axis.text.y = element_blank()) +
+  guides(alpha = "none") +
+  labs(x = "non-neutral variants", y = "non-functional HO alleles", fill = "effect on functionality")
+
+# clean
+remove(table_nonfunct_alleles_for_plot)
+
+plot_var
+```
+
+
+# Infer the thallism of untested isolates
+```{r}
+predicted_homothallics <- table_alleles_sumup_functionality$total_isolates[table_alleles_sumup_functionality$predicted_functionality == "functional"] %>% str_split(", ") %>% unlist()
+
+predicted_heterothallics <- table_alleles_sumup_functionality$total_isolates[table_alleles_sumup_functionality$predicted_functionality == "non-functional"] %>% str_split(", ") %>% unlist()
+
+predicted_unknown <- table_alleles_sumup_functionality$total_isolates[table_alleles_sumup_functionality$predicted_functionality == "undetermined"] %>% str_split(", ") %>% unlist()
+```
+
+```{r}
+scrap_df_inferred_thallism <- scrap_df %>%
+  
+  # thallism from experiment and from prediction based on HO
+  mutate(
+    thallism_experimental = thallism, 
+    
+    thallism_predictedHO = case_when(
+      scrap_id %in% predicted_homothallics ~ "homothallic", 
+      scrap_id %in% predicted_heterothallics ~ "heterothallic", 
+      TRUE ~ "unknown"), 
+    
+    to_split = case_when(
+      thallism_experimental != "unknown" ~ paste0(thallism_experimental, "_experimental"), 
+      thallism_predictedHO != "unknown" ~ paste0(thallism_predictedHO, "_predictedHO"), 
+      TRUE ~ "unknown")) %>%
+  
+  separate(col = to_split, into = c("thallism", "method"), sep = "_", fill = "right") 
+```
+
+```{r}
+# look at the coherence between predictions
+scrap_df_inferred_thallism %>% 
+  ungroup() %>%
+  group_by(thallism, thallism_experimental, thallism_predictedHO) %>%
+  mutate(isolates = paste(unlist(scrap_id), collapse = ", ")) %>%
+  group_by(thallism, thallism_experimental, thallism_predictedHO, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(nb_isolates, thallism, thallism_experimental, thallism_predictedHO, isolates)
+```
+
+
+```{r}
+# show numbers
+scrap_df_inferred_thallism %>% 
+  ungroup() %>%
+  group_by(thallism, method) %>%
+  summarise(nb_isolates = n()) %>%
+  pivot_wider(names_from = method, values_from = nb_isolates, values_fill = 0) %>%
+  mutate(total = experimental + predictedHO + `NA`)
+```
+
+```{r}
+# thallism x method
+scrap_df_inferred_thallism %>% 
+  ungroup() %>%
+  group_by(thallism, method) %>%
+  mutate(isolates = paste(unlist(scrap_id), collapse = ", ")) %>%
+  group_by(thallism, method, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(thallism, method, nb_isolates, isolates)
+```
+
+```{r}
+# look at the heterothallic for which complementation test was not made or which did not rescue homothallism
+scrap_df_inferred_thallism %>% 
+  filter(HO_functionality_experiment == "unknown", 
+         thallism_experimental == "heterothallic") %>%
+  arrange(additionnal_causes_nonswitch, thallism_predictedHO) %>%
+  select(scrap_id, thallism_experimental, HO_functionality_experiment, additionnal_causes_nonswitch, thallism_predictedHO)
+```
+
+```{r}
+scrap_df_inferred_thallism %>%
+  group_by(ploidy_OI_corrected, thallism) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = ploidy_OI_corrected, values_from = n, values_fill = 0) %>%
+  rowwise() %>%
+  mutate(total = sum(c_across(!thallism)), proportion = (total / 118) %>% round(digits = 2))
+```
+
+
+```{r}
+# clean
+remove(table_alleles_sumup_functionality, predicted_heterothallics, predicted_homothallics, predicted_unknown)
+```
+
+# Variants on the phylogenetic tree
+## Upload and clean the tree
+```{r}
+tree_scrap <- read.tree(scrap_tree_path)
+
+# remove tips with HP2
+tips_to_remove = tree_scrap$tip.label[str_detect(tree_scrap$tip.label, "HP2")]
+tree_scrap <- tree_scrap %>%
+  drop.tip(tips_to_remove)
+
+# changes the name to match the data
+tree_scrap$tip.label <- tree_scrap$tip.label %>%
+  str_replace( "CGH_1","CGH") %>%
+  str_remove( "_collapsed") %>%
+  str_remove( "_HP1")
+
+# keep only the tips for which we have a sequence
+# are all isolates in the tree ?
+scrap_df$scrap_id[!(scrap_df$scrap_id %in% tree_scrap$tip.label)] %>% sort()
+tips_to_keep <-  tree_scrap$tip.label[tree_scrap$tip.label %in% scrap_df$scrap_id]
+tips_to_keep
+
+clean_tree <- tree_scrap %>%
+  keep.tip(tips_to_keep)
+
+# merge with tables of data about the strains
+merged_data <- inner_join(clean_tree, scrap_df_inferred_thallism %>% 
+                            mutate(label = scrap_id, 
+                                   phylogenetic_clade = case_when(
+                                     phylogenetic_clade == "15. Isreal evolution canyon" ~  "15. Israel evolution canyon", 
+                                     phylogenetic_clade == "17. Spainish" ~  "17. Spanish",  
+                                     TRUE ~ phylogenetic_clade )), 
+                          by = "label")
+
+# increase the lenght of the branch for the figure
+merged_data@phylo$edge.length <- merged_data@phylo$edge.length * 500
+
+rm(tree_scrap, clean_tree)
+```
+
+## tree
+```{r}
+clades <- c("01. Wine European 1", 
+            "02. Wine European 2", 
+            #"03. Alpechin", only one strain
+            "04. Cider", 
+            "05. Brazilian bioethanol", 
+            "06. Mosaic beer", 
+            "07. French dairy", 
+            "08. African beer", 
+            "09. French Guiana human", 
+            "10. Mexican distillery/agave", 
+            "11. Mixed origin", 
+            "12. Ale beer", 
+            "13. Lab-related", 
+            "14. European clinical", 
+            "15. Israel evolution canyon", 
+            "16. Asian fermentation", 
+            "17. Spanish", 
+            "18. Asian islands", 
+            "19. African palm wine", 
+            "20. American",
+            "21. TBD", 
+            "22. Malaysian", 
+            "23. CHN V", 
+            "24. CHN III", 
+            "25. Far East Asian", 
+            "26. CHN II", 
+            "27. CHN I", 
+            "28. Taiwanese I", 
+            "29. CHN IX")
+```
+
+```{r message=FALSE, warning=FALSE}
+# for the good order of the clade name
+taxa_clade07 <- na.omit(merged_data@extraInfo$scrap_id[merged_data@extraInfo$phylogenetic_clade %in% c( "07. French dairy")])
+node07 <- getMRCA(merged_data@phylo, taxa_clade07)
+taxa_clade08 <- na.omit(merged_data@extraInfo$scrap_id[merged_data@extraInfo$phylogenetic_clade %in% c("08. African beer")])
+node08 <- getMRCA(merged_data@phylo, taxa_clade08)
+```
+
+```{r message=FALSE, warning=FALSE}
+# scrap tree
+ggt <- ggtree(merged_data) %>%
+  flip(node1 = node07, node2 = node08)
+
+i=1
+
+# Identify the node of the clade
+for (clade in clades) {
+  taxa_in_clade <- na.omit(merged_data@extraInfo$scrap_id[merged_data@extraInfo$phylogenetic_clade == clade])
+  node <- getMRCA(merged_data@phylo, taxa_in_clade)
+  
+  if (!is.null(node)) {
+    # Highlight background
+    ggt <- ggt +
+      geom_hilight(node = node,
+                   fill = ifelse(i %% 2 == 0, "lightgrey", "transparent"),
+                   alpha = 0.3,
+                   #extend = 1,
+                   #offset = 50, 
+                   xmin = -12,
+                   extend = 100,
+                   to.bottom = TRUE, 
+                   align = "both"
+                   )
+
+    # Add clade label
+    ggt <- ggt + 
+      geom_cladelabel(node = node,
+                      label = clade,
+                      fontsize = 2.5,
+                      offset = -12,
+                      align = TRUE,
+                      barsize = 0)
+    i <- i + 1 }
+}
+
+ggt
+```
+```{r message=FALSE, warning=FALSE}
+ggt2 <- ggt +
+  geom_tippoint(aes(color=thallism), size = 2, fill = "transparent") + 
+  scale_color_manual(values=c("homothallic" = "#c2f9c9" , "mixed" = "#f89c4f", "heterothallic" = "#661100"), na.value = "transparent") 
+
+ggt2
+```
+
+## Add the information about variant presence
+
+```{r message=TRUE, warning=TRUE}
+variants_for_tree <- 
+  # interesting neutral variants
+  c("413: 1 bp del.", "667G>A", "668G>A", "741G>A", "906G>A","1009G>A", "1059T>C", "1184A>G", "1377C>T", "1564: 108 bp del.", "1611A>G", "1742C>A")
+```
+
+### Selected variants
+```{r message=TRUE, warning=TRUE}
+# one line per assembly per variant
+table_tree_plot <- table_variants_funct %>%
+  filter(id_var %in% variants_for_tree) %>%
+  select(id_var, contains(c("HP", "collapsed"))) %>%
+  pivot_longer(cols = -id_var, names_to = "sequence_id", values_to = "presence") %>%
+  rowwise() %>%
+  mutate(scrap_id = str_split_i(sequence_id, "\\.", 1)  %>%
+    str_replace( "CGH_1","CGH")) %>%
+  group_by(scrap_id, id_var) %>%
+  summarise(presence = mean(presence)) %>%
+  left_join(table_variants_funct %>% select(id_var, effect_functionality, nbOcc, pos_ref), by = "id_var") %>%
+  mutate(effect_functionality = factor(effect_functionality, levels = c("neutral", "LoF", "unknown")), 
+         id_variant = factor(id_var, levels = variants_for_tree), 
+         label = scrap_id ) %>%
+  filter(presence > 0) %>%
+  ungroup() %>%
+  select(label, id_variant, presence, effect_functionality, nbOcc)
+
+table_tree_plot
+```
+#### Figure 2C
+```{r message=FALSE, warning=FALSE}
+ggt3 <- ggt2 %>% 
+    facet_plot(panel = "Presence of 12 selected HO variants", 
+               data = table_tree_plot %>% mutate(state = case_when(presence == 1 ~ "homozygous", presence == 0.5 ~ "heterozygous" )), 
+               geom = geom_tile,
+               mapping = aes(x = id_variant, fill = effect_functionality, alpha = state)) +
+  scale_x_discrete() +
+  scale_fill_manual(values = c("LoF"="#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  scale_alpha_manual(values = c("homozygous"=1, "heterozygous"=0.5)) +
+  theme(
+    strip.text = element_blank(),
+    #strip.background = element_rect(color = NA, fill = NA, linewidth = 0.5),
+    #strip.text = element_text(face = "bold"), 
+    panel.grid.major.x = element_line(color = "grey90", size = 0.3),
+    panel.background = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 7),
+    axis.title.x = element_blank(), 
+    panel.spacing = unit(0, "pt")) +
+  labs(fill = "Type of variant") +
+  guides(fill = guide_legend(title = "effect on functionality", position = "right"),
+         color = guide_legend(title = "predicted thallism", position = "right"), 
+         alpha = "none") 
+  
+
+ggt4 <- facet_labeller(ggt3, c("", "")) %>%
+  facet_widths(widths = c(1, 0.4)) 
+  
+ggt4 
+```
+#### Figure 2
+```{r message=FALSE, warning=FALSE}
+fig2D_pdf <- image_read_pdf(fig2D_path, density = 300)
+fig2D_plot <- ggdraw() + draw_image(fig2D_pdf)
+```
+
+```{r message=FALSE, warning=FALSE}
+plot_spacer_clean <- plot_spacer() + theme_void()
+
+fig2_B <- plot_grid(plot_spacer_clean, plot_var, labels = c("", ""), ncol = 1, rel_heights = c(0.05, 1))
+
+figure2_AB <- plot_grid(var_cds_funct, fig2_B, labels = c("A", "B"), ncol = 2, rel_widths = c(0.3, 1))  
+
+figure2 <- plot_grid(figure2_AB, ggt4, fig2D_plot, labels = c("", "C", "D"), ncol = 1, rel_heights = c(0.6, 1, 1))
+
+figure2
+
+ggsave(fig2_path, height = 22, width = 14)
+```
+
+### All non-neutral variants
+```{r message=TRUE, warning=TRUE}
+# one line per assembly per variant
+table_fore_tree_nonneutral <- table_variants_funct %>%
+  filter(id_var %in% variants_putEffFunct) %>%
+  select(id_var, contains(c("HP", "collapsed"))) %>%
+  pivot_longer(cols = -id_var, names_to = "sequence_id", values_to = "presence") %>%
+  rowwise() %>%
+  mutate(scrap_id = str_split_i(sequence_id, "\\.", 1)  %>%
+    str_replace( "CGH_1","CGH")) %>%
+  group_by(scrap_id, id_var) %>%
+  summarise(presence = mean(presence)) %>%
+  left_join(table_variants_funct %>% select(id_var, effect_functionality, nbOcc, pos_ref), by = "id_var") %>%
+  mutate(effect_functionality = factor(effect_functionality, levels = c("LoF", "unknown")), 
+         id_variant = factor(id_var, levels = variants_putEffFunct), 
+         label = scrap_id ) %>%
+  filter(presence > 0) %>%
+  ungroup() %>%
+  select(label, id_variant, presence, effect_functionality, nbOcc)
+
+table_fore_tree_nonneutral
+```
+# Supplementary Figure 5
+```{r message=FALSE, warning=FALSE}
+
+ggt9 <- ggt2 %>% 
+    facet_plot(panel = "Non-neutral HO variants", 
+               data = table_fore_tree_nonneutral %>% mutate(state = case_when(presence == 1 ~ "homozygous", presence == 0.5 ~ "heterozygous" )), 
+               geom = geom_tile,
+               mapping = aes(x = id_variant, fill = effect_functionality, alpha = state)) +
+  scale_x_discrete() +
+  scale_fill_manual(values = c("LoF"="#612288", "unknown"="#DDCC77")) +
+  scale_alpha_manual(values = c("homozygous"=1, "heterozygous"=0.5)) +
+  theme(
+    #strip.text = element_blank(),
+    strip.background = element_rect(color = "black", fill = NA, linewidth = 0.5),
+    strip.text = element_text(face = "bold"), 
+    panel.grid.major.x = element_line(color = "grey90", size = 0.3),
+    panel.background = element_blank(),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 6),
+    axis.title.x = element_blank(), 
+    panel.spacing = unit(0, "pt")) +
+  labs(fill = "Type of variant") +
+  guides(fill = guide_legend(title = "effect on functionality", position = "right"),
+         color = guide_legend(title = "predicted thallism", position = "right"), 
+         alpha = "none")
+  
+
+ggt10 <- facet_labeller(ggt9, c(Tree = "Phylogenetic tree with predicted thallism"))
+  
+ggt10 %>%
+  facet_widths(widths = c(1, 1.3)) 
+
+ggsave(suppfig5_path, height = 7, width = 12)
+```
+
+# Supplementary Table 1
+
+```{r message=FALSE, warning=FALSE}
+# table containing all the information about the 117 strains of ScRAP
+
+scrap_df_inferred_thallism %>% 
+  mutate( mating_type = case_when(
+           !is.na(MAT_scrapMI) ~ MAT_scrapMI, 
+           TRUE ~ MAT_scrapOI), 
+          
+          mating_type_remark = case_when(
+           scrap_id %in% c("CPI_1c", "CHS_3a") ~ "MAT genotype obtained by PCR is dubious because the strain should be haploid. In genome assembly, the strain is likely MATa instead of MATa/MATalpha.", 
+           TRUE ~ NA), 
+         
+         sporulation = case_when(
+           !is.na(resporulation_scrapMI) ~ resporulation_scrapMI, 
+           TRUE ~ sporulation_OI),
+         
+         sporulation_remark = case_when(
+                dyads_only_OI == "Yes" ~ "dyads only",
+                very_rare_sporulation_OI == "Yes" ~ "very low sporulation", 
+                TRUE ~ " "), 
+         
+         HO_functionality_bioinformatic_prediction = case_when(
+           thallism_predictedHO == "homothallic" ~ "functional", 
+           thallism_predictedHO == "heterothallic" ~ "non-functional",
+           TRUE ~ NA), 
+         
+         nb_of_dissected_spores_from_its_parent = case_when(
+           sequencing_category == "monosporic" ~  nb_genotyped_newMI, 
+           TRUE ~ NA ), 
+         
+         spore_viability_of_its_parent = case_when(
+           sequencing_category == "monosporic" ~  sporeViab, 
+           TRUE ~ NA ),
+         
+         number_of_genotyped_sibling_monosporic_isolates = case_when(
+           sequencing_category == "monosporic" ~  nb_genotyped_newMI, 
+           TRUE ~ NA ),
+         
+         `proportion_of_switchers_(MATa/MATalpha)_in_sibling_monosporic_isolates` = case_when(
+           sequencing_category == "monosporic" ~  propswitch_newMI, 
+           TRUE ~ NA ),
+         
+         number_of_sibling_monosporic_isolates_tested_for_sporulation = case_when(
+           sequencing_category == "monosporic" ~  nb_respoTested_newMI, 
+           TRUE ~ NA ),
+         
+         proportion_of_sporulators_in_sibling_monosporic_isolates = case_when(
+           sequencing_category == "monosporic" ~  proprespo_newMI, 
+           TRUE ~ NA ),
+         
+         nb_of_dissected_spores = case_when(
+           sequencing_category == "original" ~  nb_genotyped_newMI, 
+           TRUE ~ NA ), 
+         
+        spore_viability = case_when(
+           sequencing_category == "original" ~  sporeViab, 
+           TRUE ~ NA ),
+         
+         number_of_genotyped_monosporic_isolates = case_when(
+           sequencing_category == "original" ~  nb_genotyped_newMI, 
+           TRUE ~ NA ),
+         
+         `proportion_of_switchers_(MATa/MATalpha_monosporic_isolates)` = case_when(
+           sequencing_category == "original" ~  propswitch_newMI, 
+           TRUE ~ NA ),
+         
+         number_of_monosporic_isolates_tested_for_sporulation = case_when(
+           sequencing_category == "original" ~  nb_respoTested_newMI, 
+           TRUE ~ NA ),
+         
+         proportion_of_sporulators = case_when(
+           sequencing_category == "original" ~  proprespo_newMI, 
+           TRUE ~ NA ),
+         
+         ) %>%
+  rename("artDel_HO_in_metadata" = "HO_deletion",
+    "artDel_HO_in_genome_assembly" = "artDel_HO", 
+    "artDel_elsewhere_in_genome_assembly" = "artDel",  
+    "resistance_markers_in_genome_assembly" = "resistance_markers", 
+    "nb_MAT_full_locus" = "nb_MAT_full_cassettes") %>%
+  select(scrap_id, original_isolate_id, 
+         
+         # sampling information
+         isolation, ecological_origin, ecology, geographical_origin, country, continent, phylogenetic_clade, 
+         
+         # sequencing
+         project, sequenced_as, sequenced_as_corrected, sequencing_category, 
+         
+         # genomic information
+         genomic_features, 
+         ploidy_scrap_isolate, ploidy_scrap_isolate_corrected, ploidy_OI, ploidy_OI_corrected, 
+         zygosity, zygosity_OI_corrected, 
+         
+         # HO deletion
+         artDel_HO_in_metadata, artDel_HO_in_genome_assembly, artDel_elsewhere_in_genome_assembly, resistance_markers_in_genome_assembly, 
+         
+         # MAT, HML, HMR
+         expected_nb_HML_HMR_MAT, nb_HML, nb_HML_full_cassettes, nb_HMLa, nb_HMLalpha, nb_HMR, nb_HMR_full_cassettes, nb_HMRa, nb_HMRalpha,nb_MAT,  nb_MAT_full_locus, nb_MATa, nb_MATalpha, 
+         
+         # screen 
+         mating_type, mating_type_remark, sporulation, sporulation_remark, 
+         
+         # for original isolates
+         nb_of_dissected_spores, spore_viability, number_of_genotyped_monosporic_isolates, `proportion_of_switchers_(MATa/MATalpha_monosporic_isolates)`, number_of_monosporic_isolates_tested_for_sporulation, proportion_of_sporulators, 
+         
+         # for scrap MI
+         nb_of_dissected_spores_from_its_parent, spore_viability_of_its_parent, number_of_genotyped_sibling_monosporic_isolates,  `proportion_of_switchers_(MATa/MATalpha)_in_sibling_monosporic_isolates`, number_of_sibling_monosporic_isolates_tested_for_sporulation, proportion_of_sporulators_in_sibling_monosporic_isolates, 
+         
+         # complementation test
+         complementation_result, HO_functionality_experiment, 
+         
+         # prediction of the allele functionality
+         HO_functionality_bioinformatic_prediction, 
+         
+         # thallism
+         thallism_experimental, thallism_predictedHO, thallism) %>%
+  
+  write_csv(supptable_1_path)
+```

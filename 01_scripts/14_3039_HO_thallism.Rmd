@@ -1,0 +1,1231 @@
+---
+title: "Functional analysis of HO variants in the 3,034GP"
+output:
+  html_document:
+    toc: true
+    df_print: paged
+  html_notebook:
+    toc: true
+---
+
+# Environment
+
+```{r}
+# environment 
+renv::load()
+renv::restore()
+```
+
+```{r}
+# Packages
+library(readxl)
+library(tidyverse)
+library(patchwork)
+library(cowplot)
+library(UpSetR)
+library(ggmosaic)
+```
+
+```{r}
+# paths
+path_3039_db <- "03_output/01_cleaned_panels/3039_clean.csv"
+path_ecology_3039 <- "02_data/03_3039GP/2915_ecologicalNiche_thallism.xlsx"
+path_table_variants_3039 <- "03_output/06_HO_sequences_3039/HOcds_variants_and_effects_pHS2_vs_3039.csv"
+path_artificial_HO_deletion <- "03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
+path_scrap_neutral_variants <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral_variants.txt"
+```
+
+
+```{r}
+## INPUT
+
+# 3034 metadata
+path_3039_db <- "03_output/01_cleaned_panels/3039_clean.csv"
+
+# 3034 ecological niche
+path_ecology_3039 <- "02_data/03_3039GP/2915_ecologicalNiche_thallism.xlsx"
+
+# HO variants in 3034
+path_table_variants_3039 <- "03_output/06_HO_sequences_3039/HOcds_variants_and_effects_pHS2_vs_3039.csv"
+
+# artificial HO deletion
+path_artificial_HO_deletion <- "03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
+
+# neutral HO variants from scrap
+path_scrap_neutral_variants <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral_variants.txt"
+```
+
+```{r}
+## OUTPUT 
+
+# tables
+HO_variants_3034_path <- "03_output/tables/supptable4_3034GP_HO_variants.csv"
+table_3039_with_analyses_path <- "03_output/tables/supptable5_3034GP_strains_thallism.csv"
+
+# figures
+fig3_path <- "03_output/figures/figure_3.pdf"
+suppfig6_path <- "03_output/figures/suppfigure_6.pdf"
+fig4_path <- "03_output/figures/figure_4.pdf"
+
+# creates the directories for the outputs
+if (!dir.exists("03_output/tables")) {
+  dir.create("03_output/tables", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/figures")) {
+  dir.create("03_output/figures", recursive = TRUE, showWarnings = FALSE)
+}
+```
+
+
+```{r}
+myTheme <- function() {
+  theme_classic() +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      strip.background = element_rect(color = "black", fill = NA, linewidth = 0.5),
+      strip.text = element_text(face = "bold")
+    )
+}
+```
+
+# Metadata of the 3039
+
+## Artificial HO deletion
+```{r}
+strains_with_artificial_HO_deletion <- readLines(path_artificial_HO_deletion)
+```
+
+## Load metadata
+
+```{r}
+# ecological origin
+ecology_3039 <- read_excel(path_ecology_3039)
+
+
+# load metadata
+metadata_db <- read_delim(path_3039_db) %>%
+  # remove strains with an artificial HO deletion
+  filter(!(StandardizedName %in% strains_with_artificial_HO_deletion)) %>%
+  left_join(ecology_3039)
+
+# clean
+remove(ecology_3039)
+
+# display
+metadata_db
+```
+
+```{r}
+# keep strains ID
+strains_3039 <- metadata_db$StandardizedName
+```
+
+
+```{r}
+# clean
+remove(path_3039_db, path_artificial_HO_deletion, strains_with_artificial_HO_deletion)
+```
+
+# Variants
+
+## Load data
+
+```{r}
+# load raw tables of variants
+table_variants_raw <- read_delim(path_table_variants_3039) %>%
+    # create a comprehensible id for the figures
+    mutate(id_var = case_when(
+      type == "SNP" ~ paste(pos_ref, ref_nt,  ">", alt_nt, sep=""), 
+      type == "INS" ~ paste(pos_ref, as.character(size), sep = ": ") %>% paste("bp ins.", sep = " "), 
+      type == "DEL" ~ paste(pos_ref, as.character(size), sep = ": ") %>% paste("bp del.", sep = " "),
+      TRUE ~ NA)) %>%
+  arrange(pos)
+
+variants_all <- table_variants_raw$id_var
+```
+
+## Store heterozygous strains and variants
+
+First, let us look for strains which would carry unexpected IUPAC variants
+```{r}
+table_variants_raw %>%
+  rowwise() %>%
+  filter(str_detect(alt_nt, "R") |
+         str_detect(alt_nt, "Y") |
+         str_detect(alt_nt, "S") |
+         str_detect(alt_nt, "W") |
+         str_detect(alt_nt, "K") |
+         str_detect(alt_nt, "M")) %>%
+  pivot_longer(contains("_YDL227C_HOchromosome4:46271-48031"), names_to = "strain", values_to = "presence") %>%
+  filter(presence > 0) %>%
+  select(strain, id_var, pos, type, size, ref_nt, alt_nt, ref_codon, ref_amino_acid, alt_codon, alt_amino_acid)
+```
+XTRA_DFY has an insertion with a R  (A or G). Let us look if the two genotypes of this insertion exist in the database.
+
+```{r}
+table_variants_raw %>%
+  filter(pos == 925)
+```
+None of the genotypes exist, so we can ignore this problem, because it will not add a new variant.
+
+```{r}
+# look at heterozygous variant
+heterozygous_variants_df <- table_variants_raw %>%
+  rowwise() %>%
+  pivot_longer(contains("_YDL227C_HOchromosome4:46271-48031"), names_to = "strain", values_to = "presence") %>%
+  filter(presence > 0 & presence < 1) %>%
+  rowwise() %>%
+  mutate(strain = str_remove(strain, "_YDL227C_HOchromosome4:46271-48031" )) %>%
+  select(strain, id_var)
+
+# store
+heterozygous_variants <- unique(heterozygous_variants_df$id_var)
+HOheterozygous_strains <- unique(heterozygous_variants_df$strain)
+
+# display values
+paste0("Number of variants which are heterozygous in at least one strain: ", as.character(length(heterozygous_variants)), 
+       ", representing ", as.character(round(100 * length(heterozygous_variants) / length(variants_all))), "% of the variants" )
+paste0("Number of strains which are heterozygous for at least one variant in HO: ", as.character(length(HOheterozygous_strains)), 
+       ", representing ", as.character(round(100 * length(HOheterozygous_strains) / length(strains_3039))), "% of the strains.")
+```
+
+
+## Frequency and position of the variants
+
+Let us count the number of occurrences of each variant
+```{r}
+table_variants_count <- table_variants_raw  %>%
+  rowwise() %>%
+  # counts the number of occurrences of the variants
+  mutate(
+    # nb of occurrence at the homozygous state
+    nbOcc_homozygous_state = sum(c_across(contains("_YDL227C_HOchromosome4:46271-48031")) == 1), 
+    # nb of occurrence at the heterozygous state
+    nbOcc_heterozygous_state = sum(c_across(contains("_YDL227C_HOchromosome4:46271-48031")) == 0.5), 
+    # normalized: a variant present in a homozygous state worths 1, in a heterozygous state worths 0.5
+    nbOcc = sum(c_across(contains("_YDL227C_HOchromosome4:46271-48031"))), 
+    # all presence count for 1. 
+    nbOcc_notnormalized = nbOcc_homozygous_state + nbOcc_heterozygous_state, 
+    # on the non-normalized.
+    proportion_heterozygous_state = nbOcc_heterozygous_state / nbOcc_notnormalized)
+```
+
+
+
+```{r}
+# clean
+remove(table_variants_raw)
+```
+
+## Effect on the translated sequence 
+
+```{r}
+table_variants_cds <- table_variants_count %>%
+  rowwise() %>%
+  
+  mutate( 
+    
+    # create a single variable for the effect of the genotype on the translated sequence
+    effect_translated_sequence = case_when(
+      loss_start_codon ~ "start codon loss", 
+      nonsense_SNP ~ "nonsense", 
+      missense_SNP ~ "missense", 
+      synonymous_SNP ~ "synonymous", 
+      in_frame_indel_between_codons & type == "DEL" ~ "in-frame deletion", 
+      in_frame_indel_between_codons & type == "INS" ~ "in-frame insertion", 
+      in_frame_indel_within_codon ~"in-frame insertion", 
+      frameshift ~ "frameshift"), 
+    
+    effect_translated_sequence = factor(effect_translated_sequence, levels = c("synonymous", "missense", "in-frame deletion", "in-frame insertion", "nonsense", "frameshift","start codon loss" ))) %>%
+  
+  select(id_var, pos_ref, ref_nt, alt_nt, pos_codon, pos_in_codon, ref_codon, ref_amino_acid, alt_codon, alt_amino_acid, nbOcc, nbOcc_homozygous_state, nbOcc_heterozygous_state, nbOcc_notnormalized, effect_translated_sequence, proportion_heterozygous_state, contains("_YDL227C_HOchromosome4:46271-48031")) %>%
+  arrange(pos_ref)
+```
+
+```{r}
+table_variants_cds %>% 
+  group_by(effect_translated_sequence) %>%
+  summarise(n = n()) 
+```
+
+```{r}
+ggplot(table_variants_cds) +
+  geom_bar(aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "nonsense", "in-frame insertion", "frameshift",  "start codon loss")))) +
+  geom_text(stat = "count", size=2.5, color = "grey30", aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "nonsense", "in-frame insertion", "frameshift",  "start codon loss")), label = paste0("n=",..count..)), nudge_y = 4) +
+  labs(#title = "Variants compared to the pHS2 genotype",
+       #subtitle = "Effect on the translated sequence",
+    x = " ",  
+    y = "Number of variants") +
+  myTheme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+
+#ggsave("05_HO/03_functionality/scrap_only_hist_variants_effect_translatedSeq.pdf", height = 3, width = 4)
+```
+```{r}
+label_data <- table_variants_cds %>%
+  group_by(effect_translated_sequence) %>%
+  summarise(total = n()) %>%
+  mutate(label = paste0("n = ", total))
+
+ggplot(table_variants_cds %>%
+         mutate(nbOcc_fig = case_when(nbOcc_notnormalized > 100 ~ 100, TRUE ~ nbOcc_notnormalized))) +
+  geom_histogram(aes(x = nbOcc_fig), bins = 100) +
+    geom_label(data = label_data,
+            aes(x = 100, y = Inf, label = label),
+            hjust = 1.1, vjust = 1.5,
+            inherit.aes = FALSE, 
+            size = 3) +
+  scale_x_continuous(breaks = seq(from = 0, to = 100, by = 20), labels = c("0", "20", "40", "60", "80", "100+")) +
+  facet_wrap(vars(factor(effect_translated_sequence, levels =  c("synonymous", "missense", "nonsense", "in-frame insertion", "frameshift",  "start codon loss")))) +
+  labs(title = "Variants compared to the pHS2 genotype",
+       y = "number of variants", 
+       x = "number of occurrences in the 3039") +
+  myTheme() 
+
+remove(label_data)
+```
+
+
+```{r}
+ggplot(table_variants_cds %>%
+         mutate(nbOcc_fig = case_when(nbOcc_notnormalized > 100 ~ 100, TRUE ~ nbOcc_notnormalized))) +
+  geom_point(aes(x = pos_ref, y = nbOcc_fig, shape = effect_translated_sequence), size = 0.8) +
+    scale_y_continuous(breaks = seq(from = 0, to = 100, by = 20), labels = c("0", "20", "40", "60", "80", "100+")) +
+  scale_shape_manual(values =  c("synonymous" = 4,
+                                 "missense"= 8, 
+                                 "nonsense"= 22, 
+                                 "in-frame insertion" = 21,
+                                 "frameshift"=24, 
+                                 "start codon loss"=25)) +
+  labs(title = "Variants compared to the pHS2 genotype",
+    x = "Position",  
+    y = "Number of occurrences in the 3039", 
+    shape = "effect on the translated sequence") +
+  myTheme()
+
+#ggsave("05_HO/03_functionality/scrap_only_pos_variants_effect_translatedSeq.pdf", height = 5, width = 10)
+```
+
+```{r}
+# clean 
+remove(table_variants_count)
+```
+
+
+## Effect on the functionality
+
+The effect of a variant on functionality is defined as follow: 
+
+First, we use the data from the experimental screen:
+- If it is in a functional genotype of HO (tested in ScRAP): neutral
+
+We add information about the effect on the translated sequence 
+- If it is synonymous: neutral
+- If it causes frameshift, anticipated stop codon or loss start codon: LoF
+
+We also add information from the literature:
+- identification of LoF variants (Ekino 1999)
+- identification of neutral variants (Ekino 1999)
+- identification of important motifs, variants in these regions are LoF (Bakhrat 2004)
+
+```{r}
+# load neutral variants of ScRAP
+neutral_variants_scrap <- read_delim(path_scrap_neutral_variants, del = "\t", col_names = "neutral_variants")$neutral_variants
+```
+```{r}
+table_variants_funct <- table_variants_cds %>% 
+  
+  rowwise() %>%
+  
+  mutate(
+    
+    # based on the ScRAP data
+    effect_functionality_scrap = case_when(
+      id_var %in% neutral_variants_scrap ~ "neutral",
+      TRUE ~ "unknown"), 
+    
+    # based on the effect on the translated sequence
+    effect_functionality_effect_cds = case_when(
+      effect_translated_sequence == "synonymous" ~ "neutral",
+      effect_translated_sequence %in% c("start codon loss", "nonsense", "frameshift") ~ "LoF",
+      TRUE ~ "unknown"), 
+    
+    # based on the literature
+      # Ekino 1999
+    effect_functionality_Ekino = case_when(
+      effect_translated_sequence == "synonymous" ~ "unknown",
+      pos_ref == 565 & alt_nt == "G" ~ "neutral", 
+      pos_ref == 667 & alt_nt == "A" ~ "LoF",
+      pos_ref == 1214 & alt_nt == "C" ~ "neutral",
+      pos_ref == 1424 & alt_nt == "T" ~ "neutral",
+      pos_ref == 1588 & alt_nt == "A" ~ "neutral",
+      TRUE ~ "unknown"), 
+    
+      # Bakhrat 2004
+    motif = case_when(
+      pos_codon >= 216 & pos_codon <= 223 ~ "1st LAGLIDADG", 
+      pos_codon >= 325 & pos_codon <= 333 ~ "2nd LAGLIDADG",
+      pos_codon >= 466 & pos_codon <= 469 ~ "Zf1a", 
+      pos_codon >= 486 & pos_codon <= 489 ~ "Zf1b", 
+      pos_codon >= 508 & pos_codon <= 511 ~ "Zf2a", 
+      pos_codon >= 522 & pos_codon <= 525 ~ "Zf2b",
+      pos_codon >= 558 & pos_codon <= 561 ~ "Zf3a", 
+      pos_codon >= 574 & pos_codon <= 577 ~ "Zf3b (not essential)", 
+      TRUE ~ NA), 
+    effect_functionality_Bakhrat = case_when(
+      effect_translated_sequence == "synonymous" ~ "unknown",
+      pos_codon %in% c(99, 286, 333, 417) ~ "LoF", 
+      motif %in% c("1st LAGLIDADG", "2nd LAGLIDADG") ~ "LoF", 
+      pos_codon %in% c(466, 469, 508, 511, 558, 561) ~ "LoF",
+      TRUE ~ "unknown"), 
+    
+    # combine all information 
+    effect_functionality = case_when(
+      effect_functionality_scrap != "unknown" ~ effect_functionality_scrap,
+      effect_functionality_effect_cds != "unknown" ~ effect_functionality_effect_cds, 
+      effect_functionality_Ekino != "unknown" ~ effect_functionality_Ekino, 
+      effect_functionality_Bakhrat != "unknown" ~ effect_functionality_Bakhrat, 
+      TRUE ~ "unknown"))
+```
+
+```{r}
+table_variants_funct %>%
+  group_by(effect_functionality_scrap, effect_functionality_effect_cds, effect_functionality_Ekino, effect_functionality_Bakhrat, effect_functionality) %>%
+  summarise(n = n()) 
+```
+
+```{r}
+table_variants_funct %>%
+  group_by(effect_functionality) %>%
+  summarise(n = n()) 
+```
+```{r}
+ggplot(table_variants_funct) +
+  geom_bar(aes(x = factor(effect_functionality, levels =  c("LoF",  "unknown", "neutral")), fill = effect_functionality)) +
+  geom_text(aes(x = factor(effect_functionality, levels =  c("LoF",  "unknown", "neutral")), label = paste0("n=",..count..)), stat = "count", size=2.5, color = "grey30", nudge_y = 4) +
+  scale_fill_manual(values = c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"= "#88CCEE")) +
+  labs(title = "Variants compared to the pHS2 genotype",
+       subtitle = "Effect on functionality",
+    x = " ",  
+    y = "Number of variants") +
+  myTheme() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1), 
+        legend.position = "none")
+```
+
+```{r}
+var_cds_funct <- ggplot(table_variants_funct) +
+  geom_bar(aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "in-frame insertion", "nonsense",  "frameshift",  "start codon loss")), fill = effect_functionality ))  +
+  geom_text(stat = "count", size=2.5, color = "grey30", aes(x = factor(effect_translated_sequence, levels =  c("synonymous", "missense", "in-frame insertion", "nonsense",  "frameshift", "start codon loss")), label = paste0("n=",..count..)), nudge_y = 10) +
+  scale_x_discrete(label = c("synonymous", "missense", "insertion", "nonsense",  "frameshift", "start loss")) +
+  scale_fill_manual(values = c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"= "#88CCEE"))+
+  labs(
+    x = " ",  
+    y = "number of variants", 
+    fill = "effect on functionality") +
+  myTheme() +
+  theme(legend.position = "inside", legend.justification = c(0.8, 0.9))
+
+var_cds_funct + 
+  labs(title = "Variants compared to the pHS2 genotype")
+```
+
+
+```{r}
+var_freq_funct <- ggplot(table_variants_funct %>%
+         mutate(nbOcc_fig = case_when(nbOcc_notnormalized > 100 ~ 100, TRUE ~ nbOcc_notnormalized))) + 
+  geom_histogram(aes(x = nbOcc_fig, fill = effect_functionality), bins = 100) +
+  #annotate("label", label = paste(nrow(table_variants_funct), "variants"), x = 35, y = 43) +
+  scale_x_continuous(breaks = seq(from = 0, to = 100, by = 20), labels = c("0", "20", "40", "60", "80", "100+")) +
+  scale_fill_manual(values =  c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"= "#88CCEE")) +
+  labs(y = "number of variants", x = "number of genotypes", fill = "effect on functionality") +
+  myTheme() +
+  theme(legend.position = "right")
+
+var_freq_funct + 
+  labs(title = "Variants compared to the pHS2 genotype")
+
+```
+```{r}
+var_cds_freq_funct_pos <- ggplot(table_variants_funct %>%
+         mutate(nbOcc_fig = case_when(nbOcc_notnormalized > 100 ~ 100, TRUE ~ nbOcc_notnormalized))) +
+  geom_point(aes(x = pos_ref, y = nbOcc_fig, shape = effect_translated_sequence, fill = effect_functionality, color = effect_functionality), size = 1) +
+    scale_y_continuous(breaks = seq(from = 0, to = 100, by = 20), labels = c("0", "20", "40", "60", "80", "100+")) +
+  scale_fill_manual(values =  c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  scale_color_manual(values =  c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  scale_shape_manual(values =  c("synonymous" = 4,
+                                 "missense"= 8, 
+                                 "nonsense"= 22, 
+                                 "frameshift"=24, 
+                                 "start codon loss"=25, 
+                                 "in-frame insertion"=21)) +
+    guides(fill = "none") +
+  labs(x = "position",  y = "number of genotypes", shape = "type", col = "effect on functionality") +
+  xlim(0, 1761) +
+  myTheme()
+
+var_cds_freq_funct_pos
+```
+```{r}
+var_cds_freq_funct_pos_annot <- ggplot(table_variants_funct %>%
+         mutate(nbOcc_fig = case_when(nbOcc_notnormalized > 100 ~ 100, TRUE ~ nbOcc_notnormalized)), 
+         aes(x = pos_ref, y = nbOcc_fig)) +
+    scale_y_continuous(breaks = seq(from = 0, to = 100, by = 20), labels = c("0", "20", "40", "60", "80", "100+")) +
+  annotate(geom = "segment", x = 3*216, xend = 3*223, y = 1, yend = 1, color = "black", size = 2) +
+   annotate(geom = "text", x = 3*(216+223)/2, y = 2, size = 2, color = "black", label = "LAGLIDADG1") +
+  annotate(geom = "segment", x = 3*325, xend = 3*333, y = 1, yend = 1, color = "black", size = 2) +
+   annotate(geom = "text", x = 3*(325+333)/2, y = 2, size = 2, color = "black", label = "LAGLIDADG2") +
+  annotate(geom = "point", x = 3*(466+469)/2, y = 1, color = "black", shape = "*", size = 6) +
+   annotate(geom = "text", x = 3*(466+469)/2, y = 2, size = 2, color = "black", label = "Zf1a") +
+    annotate(geom = "point", x = 3*(486+489)/2, y = 1, color = "black", shape = "*", size = 6) +
+   annotate(geom = "text", x = 3*(486+489)/2, y = 2, size = 2, color = "black", label = "Zf1b") +
+  annotate(geom = "point", x = 3*(508+511)/2, y = 1, color = "black", shape = "*", size = 6) +
+   annotate(geom = "text", x = 3*(508+511)/2, y = 2, size = 2, color = "black", label = "Zf2a") +
+   annotate(geom = "point", x = 3*(522+525)/2, y = 1, color = "black", shape = "*", size = 6) +
+   annotate(geom = "text", x = 3*(522+525)/2, y = 2, size = 2,color = "black", label = "Zf2b") +
+   annotate(geom = "point", x = 3*(558+561)/2, y = 1, color = "black", shape = "*", size = 6) +
+   annotate(geom = "text", x = 3*(558+561)/2, y = 2, size = 2, color = "black", label = "Zf3a") +
+   annotate(geom = "point", x = 3*(574+577)/2, y = 1, color = "black", shape = "*", size = 6) +
+   annotate(geom = "text", x = 3*(574+577)/2, y = 2, size = 2, color = "black", label = "Zf3b") +
+  guides(fill = "none") +
+  labs(x = "position",  y = "number of genotypes", shape = "type", col = "effect on functionality") +
+  xlim(0, 1761) +
+  ylim(0, 5) +
+  theme_void()
+
+var_cds_freq_funct_pos_annot 
+```
+### Figure 3
+```{r}
+fig3_C <- plot_grid(var_cds_freq_funct_pos_annot,var_cds_freq_funct_pos, align = "v", axis ="lr", ncol = 1, rel_heights = c(0.1, 1))
+
+fig3_AB <- plot_grid(var_cds_funct + theme(legend.position = "inside", legend.justification = c(0.8, 0.8)), var_freq_funct+ theme(legend.position = "right"), labels = c("A", "B"), ncol = 2, rel_widths = c(1, 1.2)) 
+
+fig3 <- plot_grid(fig3_AB, fig3_C, labels = c("", "C"), ncol =1, rel_heights = c(1, 2))
+
+fig3
+
+ggsave(fig3_path, width = 10, height = 10)
+```
+
+### Supplementary Figure 6
+```{r}
+plot_prop_het <- ggplot(table_variants_funct %>%
+                          mutate(nb_genotypes = case_when(
+                            nbOcc_notnormalized == 1 ~ "1 genotype \n(singletons)", 
+                            nbOcc_notnormalized > 1 & nbOcc_notnormalized < 10~ "]1-10[ genotypes", 
+                            nbOcc_notnormalized >=10 & nbOcc_notnormalized < 50 ~ "[10-50[ genotypes", 
+                            nbOcc_notnormalized >= 50 ~ "50+ genotypes") %>%
+                              factor(levels = c("1 genotype \n(singletons)", "]1-10[ genotypes", "[10-50[ genotypes", "50+ genotypes")))) +
+  geom_histogram(aes(x = proportion_heterozygous_state, fill = effect_functionality)) +
+  scale_fill_manual(values =  c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  facet_grid( nb_genotypes ~. , scales = "free_y") +
+  labs(x = "proportion of heterozygous state in the 3,034GP", y = "number of variants", fill = "effect on functionality") +
+  myTheme() 
+
+plot_prop_het
+
+ggsave(suppfig6_path, width = 6, height = 8)
+```
+
+```{r}
+# variants present 10 genotypes or less
+table_variants_funct %>%
+  filter(nbOcc_notnormalized < 11) %>%
+  group_by() %>%
+  summarise(n = n(), prop = n/nrow(table_variants_funct))
+```
+
+```{r}
+table_variants_funct %>%
+  filter(effect_functionality == "LoF") %>%
+  select(id_var, proportion_heterozygous_state, contains("nbOcc")) %>%
+  arrange(desc(nbOcc_notnormalized))
+```
+```{r}
+remove(table_variants_cds, var_cds_freq_funct_pos, var_cds_funct, var_freq_funct, path_scrap_neutral_variants, var_cds_freq_funct_pos_annot, neutral_variants_scrap, plot_prop_het, fig3_AB, fig3_C, fig3)
+```
+
+## Store variants according to their effect
+```{r}
+# all variants, ordered
+table_variants_funct <- table_variants_funct %>% arrange(pos_ref)
+variants_all = table_variants_funct$id_var
+length(variants_all)
+```
+
+```{r}
+# non-synonymous variants, ordered
+table_variants_funct <- table_variants_funct %>% arrange(pos_ref)
+variants_nonsynonymous <- table_variants_funct$id_var[table_variants_funct$effect_translated_sequence != "synonymous"]
+
+length(variants_nonsynonymous)
+```
+
+```{r}
+# variants that are present in functional genotypes
+variants_neutral <- table_variants_funct$id_var[table_variants_funct$effect_functionality == "neutral"]
+
+length(variants_neutral)
+```
+
+```{r}
+# variants that are not neutral, ordered
+variants_putEffFunct <- variants_nonsynonymous[!(variants_nonsynonymous %in% variants_neutral)]
+
+length(variants_putEffFunct)
+```
+
+```{r}
+# variants LoF
+variants_LoF <- table_variants_funct$id_var[table_variants_funct$effect_functionality == "LoF"]
+
+length(variants_LoF)
+```
+
+### Supplementary Table 4
+```{r}
+table_variants_funct %>% 
+  select(id_var, pos_ref, ref_nt, alt_nt, pos_codon, pos_in_codon, ref_codon, ref_amino_acid, alt_codon, alt_amino_acid, nbOcc, effect_translated_sequence, effect_functionality, contains("YDL227C_HOchromosome4:46271-48031")) %>%
+  write_csv(file = HO_variants_3034_path)
+```
+
+# genotypes
+
+```{r}
+# all the sequences id
+seqs_all <- table_variants_funct %>% 
+  select(contains("YDL227C")) %>% 
+  colnames()
+
+length(seqs_all)
+```
+
+## Infer the functionality of the genotypes
+
+Functionality: for each genotype, 
+• If it contains only neutral variants: functional
+• If it contains at least one LoF variant at the homozygous state: non-functional
+• If it contains at least one LoF variant at the heterozygous state: heterozygous_non-functional
+
+```{r}
+table_genotypes <- table_variants_funct %>%
+  
+  # keep only id and presence in the different sequences 
+  select(c("id_var", seqs_all)) %>%
+  
+  # one line per sequence
+  pivot_longer(cols = -id_var, names_to = "sequence_id", values_to = "value") %>%
+  pivot_wider(names_from = id_var, values_from = value) %>%
+  select(sequence_id, all_of(variants_all)) %>%
+  
+  # create a column "genotype" containing the combination of variants
+  rowwise() %>%
+  mutate(genotype = paste0(c_across(variants_all), collapse = ""), 
+         
+         # count the number of variants
+         nb_variants = sum(c_across(variants_all)), 
+         nb_homozygous_variants =  sum(c_across(variants_all) == 1), 
+         nb_heterozygous_variants =  sum(c_across(variants_all) == 0.5), 
+         nb_variants_nonnormalized = nb_homozygous_variants + nb_heterozygous_variants, 
+         
+         nb_variants_LoF = sum(c_across(variants_LoF)), 
+         nb_homozygous_variants_LoF = sum(c_across(variants_LoF) == 1), 
+         nb_heterozygous_variants_LoF = sum(c_across(variants_LoF) == 0.5),
+         
+         nb_variants_putEffFunct = sum(c_across(variants_putEffFunct)),
+         nb_homozygous_variants_putEffFunct = sum(c_across(variants_putEffFunct) == 1),
+         nb_heterozygous_variants_putEffFunct = sum(c_across(variants_putEffFunct) == 0.5),
+         
+         nb_variants_neutral = sum(c_across(variants_neutral)),
+         nb_homozygous_variants_neutral = sum(c_across(variants_neutral) == 1),
+         nb_heterozygous_variants_neutral = sum(c_across(variants_neutral) == 0.5),
+         
+         # functionality based on the variants
+         predicted_functionality = case_when(
+           nb_homozygous_variants_LoF > 0 ~ "non-functional", 
+           nb_variants_LoF  > 0 ~ "heterozygous_non-functional", 
+           nb_variants == nb_variants_neutral ~ "functional",
+           TRUE ~ "unknown")) %>%
+
+  # group by genotype for the following analyses
+  ungroup() %>%
+  group_by(genotype) %>%
+  
+  # which sequences have this genotype?
+  mutate(sequences = paste(unlist(sequence_id), collapse = ", "),
+         # total number of sequences with this genotype
+           nb_sequences = n(), 
+         
+          # number of isolates
+    isolates = paste(str_split(sequences, "\\, ") %>% unlist() %>% str_remove_all("_YDL227C_HOchromosome4:46271-48031") %>% unique() %>% sort(), collapse = ", "),
+    number_isolates = str_split(sequences, "\\, ") %>% unlist() %>% str_remove_all("_YDL227C_HOchromosome4:46271-48031") %>% unique() %>% length()) %>%
+
+  # remove the id of the sequences
+  select(-sequence_id) %>%
+  
+  # one line per genotype
+  unique() %>%
+  ungroup() %>%
+  group_by(predicted_functionality, nb_variants_LoF, nb_variants_putEffFunct) %>%
+  arrange(nb_variants, .by_group = TRUE) %>%
+  ungroup() %>%
+  mutate(id = row_number() %>% factor())
+
+table_genotypes %>% select(id, predicted_functionality, nb_variants, nb_homozygous_variants_LoF, nb_variants_LoF, nb_variants_neutral, nb_variants_putEffFunct, nb_sequences,isolates, number_isolates, genotype)
+```
+```{r}
+table_genotypes %>% select(nb_heterozygous_variants, number_isolates, isolates) %>%
+  group_by(nb_heterozygous_variants) %>%
+  mutate(isolates = paste(isolates %>% sort(), collapse = ", "), 
+         nb_isolates = sum(number_isolates)) %>%
+ ungroup() %>%
+  select(nb_heterozygous_variants, nb_isolates, isolates) %>%
+  unique()
+```
+
+```{r}
+table_genotypes %>%
+  group_by(predicted_functionality) %>%
+  summarise(n = n())
+```
+
+```{r}
+p_genotype_nb_variants <- ggplot(table_genotypes) +
+  geom_col(aes(x=nb_variants, y = id, fill="neutral")) +
+  geom_col(aes(x=nb_variants_putEffFunct, y = id, fill="unknown")) +
+  geom_col(aes(x=nb_variants_LoF, y = id, fill="LoF")) +
+  facet_grid(predicted_functionality %>% factor(levels = c("functional", "non-functional", "heterozygous_non-functional", "unknown")) ~ ., scales = "free_y", space = "free_y" ) +
+  scale_fill_manual(name = "Type of variant",values = c("LoF"= "#612288", "unknown"="#DDCC77", "neutral"="#88CCEE")) +
+  myTheme() +
+  theme(legend.position = c(.95, .9),  
+    legend.justification = c(1, 1), 
+    #axis.ticks.y = element_blank(), 
+    axis.text.y = element_blank()
+    ) +
+  labs(x = "number of variants", 
+       y = "genotypes")
+
+p_genotype_nb_variants
+```
+
+```{r}
+p_genotype_frequency_isolates <- ggplot(table_genotypes) +
+  geom_histogram(aes(x = number_isolates, fill = factor(predicted_functionality, levels = c("unknown", "non-functional", "functional"))), ) +
+  scale_fill_manual(values = c("functional" = "#c2f9c9" , "non-functional" = "#661100", "heterozygous_non-functional"  = "#f89c4f", "unknown" = "gray90")) +
+  myTheme() +
+  theme(legend.position = c(.9, .9),  
+    legend.justification = c(1, 1)) +
+  labs(x = "number of isolates", 
+       y = "number of genotypes",
+       fill = "predicted functionality")
+
+p_genotype_frequency_isolates
+```
+
+
+```{r}
+# Let us look at the most frequent genotypes 
+table_genotypes %>% 
+  filter(nb_sequences > 30) %>% 
+  select(nb_sequences, predicted_functionality, nb_variants, nb_homozygous_variants_LoF, nb_heterozygous_variants_LoF, nb_homozygous_variants_neutral, nb_heterozygous_variants_neutral) %>%
+  arrange(desc(nb_sequences))
+```
+
+### Summary of the number of genotype per functionality
+```{r}
+table_genotypes_sumup_functionality <-  table_genotypes %>%
+  
+  # group by predicted functionality
+  group_by(predicted_functionality) %>%
+  
+  # count the number of genotypes
+  mutate(total_number_genotypes = n(),
+    
+    # count the number of isolates
+    total_isolates = paste(str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("_YDL", 1) %>% unique() %>% sort(), collapse = ", "),
+    total_number_isolates = str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("_YDL", 1) %>% unique() %>% length(), 
+    
+    proportion_isolates = total_number_isolates / 2915
+    
+    ) %>%
+  
+  # keep only useful columns
+  select(predicted_functionality, total_number_genotypes, total_number_isolates, proportion_isolates, total_isolates) %>%
+  unique() %>%
+  arrange(predicted_functionality) 
+
+table_genotypes_sumup_functionality
+```  
+
+
+# Infer the thallism behaviour of untested isolates
+
+```{r}
+predicted_homothallics <- table_genotypes_sumup_functionality$total_isolates[table_genotypes_sumup_functionality$predicted_functionality == "functional"] %>% str_split(", ") %>% unlist()
+
+predicted_heterothallics <- table_genotypes_sumup_functionality$total_isolates[table_genotypes_sumup_functionality$predicted_functionality == "non-functional"] %>% str_split(", ") %>% unlist()
+
+predicted_partlyheterothallics <- table_genotypes_sumup_functionality$total_isolates[table_genotypes_sumup_functionality$predicted_functionality == "heterozygous_non-functional"] %>% str_split(", ") %>% unlist()
+
+predicted_unknown <- table_genotypes_sumup_functionality$total_isolates[table_genotypes_sumup_functionality$predicted_functionality == "unknown"] %>% str_split(", ") %>% unlist()
+```
+
+```{r}
+thallism_3039 <- metadata_db %>%
+  
+  # switch from experiment and from prediction based on HO
+  mutate(
+     thallism= case_when(
+      StandardizedName %in% predicted_homothallics ~ "homothallic", 
+      StandardizedName %in% predicted_heterothallics ~ "heterothallic", 
+      StandardizedName %in% predicted_partlyheterothallics ~ "partly heterothallic", 
+      TRUE ~ "unknown")) 
+
+thallism_3039
+```
+### Supplementary Table 5
+```{r}
+write_csv(thallism_3039,  
+          table_3039_with_analyses_path)
+```
+
+
+# Thallism against other traits
+
+```{r}
+clade_order <- thallism_3039 %>%
+  select(Clade) %>%
+  unique() %>%
+  mutate(clade_number = str_split_i(Clade, "\\.", 1) %>% as.numeric()) %>%
+  arrange(clade_number)
+
+clade_order <- clade_order$Clade
+
+complete_thallism_3039_sorted <- thallism_3039 %>% mutate(Clade = factor(Clade, levels = clade_order))
+```
+
+```{r}
+thallism_for_plots <- complete_thallism_3039_sorted %>% 
+  mutate(thallism_tosplit = case_when(
+    thallism == "partly heterothallic" ~ "heterothallic_partly", 
+    thallism == "heterothallic" ~ "heterothallic_full", 
+    thallism == "homothallic" ~ "homothallic_full", 
+    thallism == "unknown" ~ "unknown_full", 
+  )) %>%
+  separate(thallism_tosplit, into = c("thallism", "partial"), sep = "_")
+```
+
+
+### Figure 4A
+```{r}
+fig4A <- ggplot(thallism_for_plots) +
+  geom_bar(aes(x = factor(Ploidy, levels = c("1","2","3","4","5")), 
+               fill = factor(thallism, levels=c("unknown", "heterothallic", "homothallic")), 
+              )) + 
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+  myTheme() + 
+  labs(x = "ploidy", y = "number of isolates", fill = "thallism") +
+  theme(legend.position = "inside", 
+        legend.justification = c(0.9, 0.9)) +
+  guides(alpha = "none")
+
+fig4A
+```
+
+```{r}
+thallism_for_plots %>% 
+  mutate(ploidy = case_when(
+    Ploidy == 1 ~ "haploid", 
+    Ploidy == 2 ~ "diploid", 
+    Ploidy > 2 ~"polyploid", 
+    TRUE ~ "unknown"
+  )) %>%
+  group_by(ploidy, thallism) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         )
+```
+
+```{r}
+thallism_for_plots %>% 
+  mutate(ploidy = case_when(
+    Ploidy == 1 ~ "haploid", 
+    Ploidy == 2 ~ "diploid", 
+    Ploidy > 2 ~"polyploid", 
+    TRUE ~ "unknown"
+  )) %>%
+  group_by(ploidy, thallism) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = ploidy, values_from = n, values_fill = 0) %>%
+  mutate(total = haploid + diploid + polyploid + unknown, 
+         haploid_prop = haploid / total, 
+         diploid_prop = diploid / total, 
+         polyploid_prop = polyploid / total, 
+         unknown_prop = unknown / total
+         )
+```
+
+
+```{r}
+thallism_3039_for_mosaic <- thallism_for_plots %>%
+  filter(!is.na(Zygosity),
+         !is.na(Clade)) %>%
+  mutate(Zygosity = factor(Zygosity, levels = c("Homozygous", "Heterozygous")))
+nrow(thallism_3039_for_mosaic)
+```
+
+
+## Figure 4B
+```{r}
+intersection_count = thallism_3039_for_mosaic %>%
+  group_by(Zygosity) %>%
+  mutate(prop_zygosity = n() / nrow(thallism_3039_for_mosaic)) %>%
+  ungroup() %>%
+  group_by(Zygosity, thallism, prop_zygosity) %>%
+  mutate(prop_zygthall = n() / (nrow(thallism_3039_for_mosaic) * prop_zygosity)) %>%
+  select(Zygosity, thallism, prop_zygosity, prop_zygthall) %>%
+  unique() %>%
+  pivot_wider(names_from = thallism, values_from = prop_zygthall)  %>%
+  mutate(unknown =  heterothallic + homothallic + (unknown / 2), 
+         homothallic = heterothallic + (homothallic / 2),
+         heterothallic =  heterothallic / 2) %>%
+  pivot_longer(cols = c( "heterothallic", "homothallic", "unknown"), names_to = "thallism", values_to = "pos_y") %>%
+  mutate(pos_x = case_when(
+    Zygosity == "Heterozygous" ~ (1-prop_zygosity) + (prop_zygosity /2), 
+    TRUE ~ prop_zygosity /2
+  )) %>%
+  select(Zygosity, thallism, pos_x, pos_y)
+
+homozygous_pos = mean(intersection_count$prop_zygosity[intersection_count$Zygosity == "Homozygous"]) / 2
+heterozygous_pos = (2*homozygous_pos)  + (mean(intersection_count$prop_zygosity[intersection_count$Zygosity == "Heterozygous"]) / 2)
+  
+fig4B <- ggplot(thallism_3039_for_mosaic %>% mutate(pop = "All strains")) +
+  geom_mosaic(aes(x = product(thallism, Zygosity), 
+              fill = thallism), 
+              color = "black") +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+    facet_wrap(pop ~ .)   +
+    annotate(geom = "text", x = 0.5, y = 1.1, 
+             label = paste0("n=", 
+                             nrow(thallism_3039_for_mosaic), 
+                            ", ", 
+                            100 * round(sum(thallism_3039_for_mosaic$Ploidy > 2, na.rm = TRUE) / nrow(thallism_3039_for_mosaic), 2), 
+                            "% polyploids"), size = 4, color = "grey30", face = "bold") +
+  annotate(geom = "text", x = homozygous_pos, y = -0.1, label = "%homozygous", size = 3, color = "grey30") +
+  annotate(geom = "text", x = heterozygous_pos, y = -0.1, label = "%heterozygous", size = 3, color = "grey30") +
+  ylab("")+
+  xlab('%homozygous strains')  +          
+  theme(axis.ticks.x = element_blank(),             
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_blank(),
+        
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.title = element_text(color = 'black', face = 'bold'), 
+        strip.text = element_text(size =12, color = 'black', face = 'bold'),
+        strip.background = element_blank(), 
+        legend.position = "right") 
+
+fig4B
+```
+
+
+```{r}
+thallism_for_plots %>% 
+  group_by(Zygosity, thallism) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
+  mutate(total = Homozygous + Heterozygous + `NA`, 
+         Homozygous_prop = Homozygous / total, 
+         Heterozygous_prop = Heterozygous / total
+         )
+```
+
+```{r}
+thallism_for_plots %>% 
+  group_by(Zygosity, thallism) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         )
+```
+
+
+
+
+
+## Figure 4C
+
+```{r}
+polyploidy_proportion <- thallism_3039_for_mosaic %>% 
+  mutate(ploidy = case_when( 
+    Ploidy > 2 ~"polyploid", 
+    TRUE ~ "other"
+  )) %>%
+  group_by(Clade, ploidy) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = ploidy, values_from = n, values_fill = 0) %>%
+  mutate(total = polyploid + other, 
+         polyploid_prop = 100 * round(polyploid / total, 2))
+
+fig4C <- ggplot(thallism_3039_for_mosaic) +
+  geom_mosaic(aes(x = product(thallism, Zygosity), 
+              fill = thallism), 
+              color = "black") +
+  facet_wrap(Clade ~ ., ncol = 6)   +
+      geom_text(data = polyploidy_proportion, 
+            aes(x = 0.5, y = 1.1, label = paste0("n=", total,", ", polyploid_prop, "% polyploids")),
+            size = 2.5,
+            inherit.aes = FALSE, 
+            color = "grey30") +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+  xlab('%homozygous strains')  + 
+  ylab("")+
+  theme(axis.ticks.x = element_blank(),             
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.title = element_text(color = 'black', face = 'bold'), 
+        strip.text = element_text(size = 7, color = 'black', face = 'bold'),
+        strip.background = element_blank(), 
+        legend.position = "none") 
+
+fig4C
+  
+```
+
+```{r}
+homothallic_clades <- thallism_for_plots %>% 
+  group_by(Clade, thallism) %>% 
+  summarise(n = n()) %>% 
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         ) %>%
+  filter(homothallic_prop > 0.80)
+
+homothallic_clades
+
+homothallic_clades <- homothallic_clades$Clade
+
+
+thallism_for_plots %>% 
+ filter(Clade %in% homothallic_clades) %>%
+  group_by(Clade, Zygosity) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
+  mutate(total = Homozygous + Heterozygous, 
+         Homozygous_prop = Homozygous / total, 
+         Heterozygous_prop = Heterozygous / total
+         ) %>%
+  arrange(Heterozygous_prop) 
+```
+
+```{r}
+heterothallic_clades <- thallism_for_plots %>% 
+  group_by(Clade, thallism) %>% 
+  summarise(n = n()) %>% 
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         ) %>%
+  filter(heterothallic_prop > 0.80)
+
+heterothallic_clades
+
+heterothallic_clades <- heterothallic_clades$Clade
+
+
+thallism_for_plots %>% 
+ filter(Clade %in% heterothallic_clades) %>%
+  group_by(Clade, Zygosity) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
+  mutate(total = Homozygous + Heterozygous, 
+         Homozygous_prop = Homozygous / total, 
+         Heterozygous_prop = Heterozygous / total
+         ) %>%
+  arrange(Heterozygous_prop) %>%
+  left_join(polyploidy_proportion)
+
+```
+
+
+```{r}
+both_clades <- thallism_for_plots %>% 
+  group_by(Clade, thallism) %>% 
+  summarise(n = n()) %>% 
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         ) %>%
+  filter(heterothallic_prop > 0.2) %>%
+  filter(homothallic_prop > 0.2)
+
+both_clades
+
+both_clades <- both_clades$Clade
+
+
+thallism_for_plots %>% 
+ filter(Clade %in% both_clades) %>%
+  group_by(Clade, Zygosity) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
+  mutate(total = Homozygous + Heterozygous, 
+         Homozygous_prop = Homozygous / total, 
+         Heterozygous_prop = Heterozygous / total
+         ) %>%
+  arrange(Heterozygous_prop) %>%
+  left_join(polyploidy_proportion) %>%
+  filter(!is.na(Clade))
+
+```
+
+
+```{r}
+thallism_for_plots %>% 
+  group_by(Clade, Zygosity) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
+  mutate(total = Homozygous + Heterozygous, 
+         Homozygous_prop = Homozygous / total, 
+         Heterozygous_prop = Heterozygous / total
+         ) %>%
+  filter(Homozygous_prop > 0.80)
+  
+```
+
+```{r}
+thallism_for_plots %>% 
+  group_by(Clade, thallism) %>% 
+  summarise(n = n()) %>% 
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         )
+```
+
+```{r}
+thallism_for_plots %>% 
+  group_by(Clade, thallism) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         ) %>%
+  filter(homothallic_prop > 0.9)
+  
+```
+
+
+### Figure 4D
+```{r}
+count_ecology <- thallism_for_plots %>%
+  filter(!is.na(Ecological_niche)) %>%
+  group_by(Ecological_niche, thallism) %>%
+  summarise(n = n()) %>%
+  group_by(Ecological_niche) %>%
+  summarise(
+    max = max(n) * (1.1),
+    n = sum(n))
+  
+
+fig4D <- ggplot(thallism_for_plots %>% filter(!is.na(Ecological_niche))) +
+  geom_bar(aes(x = factor(thallism, levels=c("heterothallic","homothallic", "unknown")),  
+               fill = factor(thallism, levels=c("unknown", "heterothallic", "homothallic"))), 
+           stat = "count", width = 1) +
+  
+  geom_text(data = count_ecology, aes(label = paste("n =",n), y = max), x = 3, inherit.aes = FALSE, size = 3, vjust = 1 , hjust = 0.5) + 
+
+  facet_wrap(vars(Ecological_niche), scale = "free_y", nrow = 1) +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" ,  "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+  myTheme() + 
+  theme( axis.title.x = element_blank(), 
+        axis.ticks.x = element_blank(),    
+        axis.text.x = element_blank(), 
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.title = element_text(color = 'black', face = 'bold'), 
+        strip.text = element_text(size = 8, color = 'black', face = 'bold'),
+        strip.background = element_blank(), ) +
+  labs(x = "", y = "number of isolates", fill = "thallism") +
+  guides(alpha = "none")
+
+fig4D
+```
+```{r}
+thallism_for_plots %>% 
+  group_by(Ecological_niche, thallism) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total)
+```
+```{r}
+thallism_for_plots %>%
+  group_by(thallism, Ecological_niche) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Ecological_niche, values_from = n, values_fill =  0) %>%
+  mutate(total = Anthropogenic + Natural + Unknown, 
+         prop_anth = Anthropogenic / total, 
+         prop_nat = Natural / total, 
+         unknown = Unknown / total)
+```
+
+```{r}
+thallism_for_plots %>%
+  filter(Ecological_niche == "Natural" & thallism == "heterothallic") %>%
+  group_by(Clade) %>%
+  summarise(n = n(), prop = n/73) %>%
+  arrange(desc(n))
+```
+
+
+
+```{r}
+plot_spacer_clean <- plot_spacer() + theme_void()
+fig4AB  <- plot_grid(fig4A,  plot_spacer_clean, fig4B, 
+                  ncol = 3, labels = c("A", "",  "B"), 
+                  rel_widths = c(1, 0.1, 1))
+
+fig4ABC  <- plot_grid(fig4AB, 
+                      plot_spacer_clean, 
+                      fig4C, 
+                  ncol = 1, labels = c("", "", "C"), 
+                  rel_heights = c(1,0.1, 4))
+
+figure_4 <- plot_grid(fig4ABC, plot_spacer_clean, fig4D, ncol = 1, labels = c("", "", "D"), rel_heights = c(5, 0.1, 1))
+
+
+figure_4
+
+ggsave(fig4_path, width = 8, height = 15)
+```
+
+
+
+

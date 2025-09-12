@@ -1,0 +1,1041 @@
+---
+title: "Experimental screen for homothallism and heterothallism + Complementation tests"
+output: 
+  html_notebook: 
+    toc: true
+---
+
+# Environment
+
+```{r}
+# environment 
+renv::load()
+renv::restore()
+```
+
+```{r}
+# Packages
+library(tidyverse)
+library(readxl)
+library(stringr.plus)
+library(gridExtra)
+library(gcookbook) 
+library(patchwork)
+library(cowplot)
+library(magick)
+library(ggpattern)
+```
+
+```{r}
+# INPUT
+
+# path to cured ScRAP metadata
+path_cured_metadata <- "03_output/01_cleaned_panels/scrap_clean.csv"
+
+# path to the file with the experimental data
+path_experimental_data <- "02_data/04_experimental_results/experiments.xlsx"
+
+# MAT, HML and HMR in the genome assemblies
+path_MAT_HMR_HML <- "03_output/02_MAT_HMR_HML/scrap_HMR_HML_MAT_presence_storedY.csv"
+
+# shcematics to include in figure 1
+fig_1A_path <- "02_data/06_figures/figure_1A.pdf"
+fig_1B_path <- "02_data/06_figures/figure_1B.pdf"
+```
+
+```{r}
+## OUTPUT 
+
+# figures
+suppfig2_path <- "03_output/figures/suppfigure_2.pdf"
+figure_1_path <- "03_output/figures/figure_1.pdf"
+
+# intermediary files
+scrap_thallism_from_screen_path <- "03_output/03_experimental_screen/scrap_thallism_from_screen.csv"
+scrap_complementation_path <- "03_output/04_complementation_assay/complementation_results.csv"
+
+# creates the directories for the outputs
+if (!dir.exists("03_output/figures/")) {
+  dir.create("03_output/figures/", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/03_experimental_screen/")) {
+  dir.create("03_output/03_experimental_screen/", recursive = TRUE, showWarnings = FALSE)
+}
+if (!dir.exists("03_output/04_complementation_assay/")) {
+  dir.create("03_output/04_complementation_assay/", recursive = TRUE, showWarnings = FALSE)
+}
+```
+
+
+```{r}
+# theme for the plots
+myTheme <- function() {
+  theme_classic() +
+    theme(panel.border = element_rect(color = "black", fill = NA, linewidth = 0.3), 
+          strip.background = element_rect(color = "black", fill = NA, linewidth = 0.3),
+          axis.line = element_line(color = "black",  linewidth = 0.3), 
+          strip.text = element_text(face = "bold"))
+}
+```
+
+
+# Load previous data for the 117 isolates
+
+
+```{r}
+# load data from MAT, HMR and HMR
+MAT_HMR_HML_scrap_df <- read_delim(path_MAT_HMR_HML)
+
+# load metadata
+metadata_scrap_df <- read_delim(path_cured_metadata) %>% full_join(MAT_HMR_HML_scrap_df)
+remove(MAT_HMR_HML_scrap_df)
+
+metadata_scrap_df
+```
+
+
+# Experimental screen
+## ScRAP monosporic isolates (n=45)
+
+45 isolates of the ScRAP collection are monosporic isolates. They were produced by isolating a single spore of the original diploid isolate. Since its parent (the original strain) is diploid with mating type a/alpha, the spore is haploid with a single mating type a or alpha. If the isolate is heterothallic, we expect that it has maintained a single mating type and is unable to sporulate. If it is homothallic, we expect that it has switched mating type and mated: it should be a/alpha and able to sporulate.
+
+We first import the data from the original diploid parents of these monosporic isolates
+
+```{r}
+# import data about the original diploid parent of the isolates
+scrapMI_OI_df <- read_xlsx(path_experimental_data, sheet = "scrapMI_OI") %>%
+  rename(MAT_scrapMI_OI = MAT_genotype, 
+         sporulation_scrapMI_OI= sporulation)
+```
+
+```{r}
+# import data about the original diploid parent of the isolates
+scrapMI_OI_df %>% 
+  group_by(MAT_scrapMI_OI, sporulation_scrapMI_OI) %>%
+  summarise(n = n(),
+            isolates = paste(strain_id, collapse = " ")) 
+```
+
+All tested isolates are a/alpha. All tested isolates sporulate. 
+
+Now, we import data from the monosporic ScRAP isolates themselves
+
+```{r}
+# import data from monosporic isolates
+scrapMI_df <- read_xlsx(path_experimental_data, sheet = "scrapMI") %>%
+  
+  mutate(
+    # was there a mating-type switch?
+    switch = case_when(
+       MAT_genotype == "a" ~ "no",
+       MAT_genotype == "alpha" ~ "no",    
+       MAT_genotype == "a/alpha" ~ "yes", 
+       TRUE ~ NA), 
+    # is the isolate able to sporulate?
+    resporulation_scrapMI = case_when(
+       sporulation == "No" ~ "no_resporulation",
+       sporulation == "Yes" ~ "resporulation"))
+
+scrapMI_df
+```
+
+```{r}
+# show numbers
+scrapMI_df %>% 
+  group_by(MAT_genotype, switch) %>%
+  summarise(nb_isolates= n()) %>%
+  arrange(switch)
+```
+```{r}
+# show numbers
+scrapMI_df %>% 
+  group_by(switch, resporulation_scrapMI) %>%
+  summarise(nb_isolates = n()) %>%
+  pivot_wider(names_from = resporulation_scrapMI, values_from = nb_isolates, values_fill = 0) %>%
+  mutate(total = no_resporulation + resporulation)
+```
+
+Three monosporic isolates have mating-type a/alpha, they are diploid, and they come from parent that were able to sporulate, but they cannot not sporulate themselves. 
+
+```{r}
+# which are the homothallics that do not resporulate?
+scrapMI_df %>% 
+  filter(switch == "yes" & resporulation_scrapMI == "no_resporulation") 
+```
+
+Let us look at the coherence between the ploidy and the zygosity of the isolates. 
+
+```{r}
+scrapMI_complete_df <- scrapMI_df %>%
+  
+  # join the metadata
+  mutate(MAT_scrapMI = MAT_genotype) %>%
+  left_join(metadata_scrap_df, by = join_by("scrapmi_id" == "scrap_id")) %>%
+  rename(scrap_id = scrapmi_id) %>%
+  
+  # coherence between ploidy and homothallic phenotype
+  mutate(coherence_scrapMI_metadata = case_when(
+    # the MATa or MATalpha monosporic isolates are expected to be haploid
+    switch == "no" & ploidy_scrap_isolate_corrected == 1 ~ "coherent", 
+    # the MATa/MATalpha monosporic isolates are expected to be diploid
+    switch == "yes" & ploidy_scrap_isolate_corrected == 2 ~ "coherent",
+    # if one informaiton is lacking, we cannot conclude
+    is.na(switch) | is.na(ploidy_scrap_isolate_corrected) ~ NA,
+    # other situations are incoherent
+    TRUE ~ "incoherent"))
+```
+```{r}
+# display the coherence between ploidy and homothallic phenotype
+scrapMI_complete_df %>% 
+  group_by(switch, ploidy_scrap_isolate_corrected, sporulation) %>%
+  mutate(isolates = paste(scrap_id, collapse = " ")) %>%
+  group_by(coherence_scrapMI_metadata, switch, ploidy_scrap_isolate_corrected, sporulation, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(nb_isolates, coherence_scrapMI_metadata, switch, sporulation, ploidy_scrap_isolate_corrected, isolates)) %>%
+  arrange(coherence_scrapMI_metadata)
+```
+
+Most of the experimental results are coherent with the annotated ploidy of the isolate:
+
+-   10 haploid monosporic isolates have one mating type (3 a and 8 alpha) and do not sporulate. They can be considered heterothallic. 
+
+-   31 diploid monosporic isolates are a/alpha, among which 28 sporulate and 3 do not sporulate (BDM_1a, CEI_1a and CPA_1a). They can be considered homothallic, although for the 3 non-sporulating isolates, the sexual cycle cannot be completed.
+
+There is one lacking result: the AMH_1a isolate is contaminated in our tube, so we could not test its mating type, but we could test that is was not sporulating. We cannot conclude from this experiment for this isolate. 
+
+There are a few unexpected results:
+
+-   1 monosporic isolate has only one mating-type, but was annotated as diploid is the database: ALH_1b. This isolate can be considered heterothallic, because it maintains a stable alpha mating type. It is possible that this isolate underwent endoreduplication, without mating-type switching.
+
+-   2 monosporic isolates are haploid according to ScRAP metadata, but they are a/alpha and they sporulate (CHS_3a and CPI_1c). Among our hypothesis: (1) our tube was contaminated or (2) they underwent rare mating-type switching between the sequencing and our experiments. We dissected new isolates from the same genetic background to conclude about these two isolates. For now, we consider their homothallism as dubious.
+
+```{r}
+# maybe the three non-sporulating homothallic have accumulated heterozygous mutations in sporulation genes? 
+scrapMI_complete_df %>% 
+  # keep the three non-sporulating homothallic
+  filter(switch == "yes", sporulation == "No") %>%
+  select(scrap_id, MAT_scrapMI, sporulation, zygosity_OI_corrected)
+```
+
+BDM_1a and CPA_1a have genome-wide heterozygous parents. They could have accumulated heterozygous recessive mutations preventing sporulation. But CEI_1a has a genome-wide homozygous parent, so this explanation is less likely. 
+
+```{r}
+# new database
+scrap_df_1 <- scrapMI_complete_df %>% 
+  left_join(scrapMI_OI_df, by = join_by("original_isolate_id" == "strain_id")) %>%
+  mutate(dubious_result_scrapMI = case_when(
+      # we denote as dubious the two haploid strains which likely underwent contamination or unprogrammed mating type swithcing 
+      switch == "yes" & ploidy_scrap_isolate_corrected == 1 ~ "dubious", 
+    TRUE ~ NA), 
+    thallism_scrapMI = case_when(
+      switch == "yes" & ploidy_scrap_isolate_corrected == 1 ~ NA, # dubious haploid a/alpha: they are probably heterothallic 
+      switch == "no" ~ "heterothallic",
+      switch == "yes" ~  "homothallic",
+    TRUE ~ NA) ) %>%
+  select(c(scrap_id, MAT_scrapMI, thallism_scrapMI, resporulation_scrapMI, dubious_result_scrapMI, MAT_scrapMI_OI, sporulation_scrapMI_OI)) %>%
+  right_join(metadata_scrap_df) 
+```
+
+```{r}
+# clean
+remove(path_cured_metadata, metadata_scrap_df, scrapMI_df, scrapMI_complete_df)
+```
+
+## Original isolates (n=73)
+
+This part focuses on the analysis of original isolates of the ScRAP study, which were sequenced directly.
+
+```{r}
+# import data
+# the original isolates that were sequenced directly
+scrapOI_df <- read_xlsx(path_experimental_data, sheet = "scrapOI")
+
+scrapOI_df
+```
+
+```{r}
+# show numbers
+scrapOI_df %>% 
+  group_by(MAT_genotype) %>%
+  mutate(isolates = paste(strain_id, collapse = " ")) %>%
+  group_by(MAT_genotype, isolates) %>%
+  summarise(nb_isolates= n()) %>%
+  select(c(nb_isolates,MAT_genotype,isolates))
+```
+
+```{r}
+# coherence with the ploidy of the isolate
+scrapOI_complete_df = scrapOI_df %>% 
+  left_join(scrap_df_1, by = join_by(strain_id == scrap_id)) %>%
+  rename("scrap_id" = strain_id) %>%
+  mutate(coherence = case_when(
+    MAT_genotype %in% c("a", "alpha") & ploidy_scrap_isolate_corrected == 1 ~ "coherent", 
+    MAT_genotype == "a/alpha" & ploidy_scrap_isolate_corrected >= 2 ~ "coherent",
+    is.na(MAT_genotype) | is.na(ploidy_scrap_isolate_corrected) ~ NA,
+    TRUE ~ "incoherent"
+  )) %>%
+  select(scrap_id, MAT_genotype, ploidy_scrap_isolate_corrected, sporulation, very_rare_sporulation, dyads_only, coherence)
+```
+
+```{r}
+# display the values
+scrapOI_complete_df %>%
+  group_by(MAT_genotype, ploidy_scrap_isolate_corrected, sporulation, coherence) %>%
+  mutate(isolates = paste(scrap_id, collapse = " ")) %>%
+  group_by(MAT_genotype, ploidy_scrap_isolate_corrected, sporulation, coherence, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(nb_isolates, ploidy_scrap_isolate_corrected, coherence, MAT_genotype, sporulation, isolates)) %>%
+  arrange(coherence, ploidy_scrap_isolate_corrected)
+```
+
+Most of the results are coherent with the annotated ploidy of the isolate:
+
+-   8 haploid isolates have a single mating type (3 a and 5 alpha) and are not able to sporulate.
+
+-   35 diploid isolates are a/alpha, among which 25 sporulate and 10 do not sporulate.
+
+-   13 polyploid isolates are a/alpha.
+
+Some results are lacking:
+
+-    7 isolates (AEG, AVB, ADS, CENPK1137D, SK1, SX2, Y55) are absent from the database so we could not test their mating type and sporulation in this study.
+
+-   The 4 isolates with uncertain ploidy are MATa/MATalpha (AEH AFH AGK HLJ1).
+
+There are a few unexpected results:
+
+-   5 isolates are annotated as diploid in ScRAP metadata, but they are MATa and do not sporulate (AAB, AAC, ADM, AEL, AFI). It is possible that they are homozygous at the mating-type locus. 
+
+
+All the 13 isolateswith a single mating type  (8 haploids and 5 diploids) are considered as heterothallic, because they are able to maintain a stable mating type. For the others, we cannot conclude on their thallism phenotype. 
+
+```{r}
+# new database
+scrap_df_2 <- scrapOI_complete_df %>% 
+  mutate(
+    
+    # rename_variables 
+    MAT_scrapOI = MAT_genotype,
+    sporulation_OI = sporulation, 
+    very_rare_sporulation_OI = very_rare_sporulation, 
+    dyads_only_OI = dyads_only,
+    
+    # no switch if the isolate has a single mating type
+    thallism_scrapOI = case_when(
+      MAT_scrapOI %in% c("a", "alpha") ~ "heterothallic", 
+      TRUE ~ NA)) %>%
+    
+  select(c(scrap_id, MAT_scrapOI, sporulation_OI, very_rare_sporulation_OI, dyads_only_OI, thallism_scrapOI)) %>%
+  right_join(scrap_df_1) 
+
+```
+
+```{r}
+# results so far 
+scrap_df_2 %>%
+  group_by(thallism_scrapMI, thallism_scrapOI) %>%
+  mutate(isolates= paste(scrap_id, collapse = " ")) %>%
+  group_by(thallism_scrapMI, thallism_scrapOI, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(nb_isolates, thallism_scrapMI, thallism_scrapOI))
+```
+ 
+```{r}
+# results so far 
+scrap_df_2 %>%
+  filter(sequencing_category == "original" & MAT_scrapOI == "a/alpha" & ploidy_scrap_isolate_corrected == 2) %>%
+  group_by(sporulation_OI, dyads_only_OI, very_rare_sporulation_OI) %>% summarise(n = n())
+```
+Among the 35 MATa/MATalpha diploid isolates, 10 do not sporulate, 3 sporulate at very low frequency (to low to be dissected) and 1 produce only dyads, so we cannot be sure that the spores are haploid with a single mating type. 
+
+```{r}
+# clean
+remove(scrap_df_1, scrapOI_df, scrapOI_complete_df)
+```
+
+## Newly-created monosporic isolates
+
+This part focuses on the analysis of the monosporic isolates that were created by dissecting diploid sporulating MATa/alpha isolates. There are two groups of isolates that were dissected: 
+
+-   the original isolates of the ScRAP study,
+
+-   or the parents of the ScRAP monosporic isolates, to create sibling monosporic isolates and check the consistency.
+
+```{r}
+# import data
+# the newly dissected monosporic isolates from undissected isolates in ScRAP (i.e. the original isolates was sequenced directly)
+newMI_from_scrapOI_df <- read_xlsx(path_experimental_data, sheet = "newMI_from_scrapOI") %>%
+  mutate(parent_type = "scrapOI") %>%
+  # remove dyads (we do not know the ploidy of the spores)
+  filter(nb_spores_ascus != "2")
+
+# the newly dissected monosporic isolates from isolates with a ScRAP monosporic isolates (i.e. the original isolates was dissected, and one of its monosporic isolates was sequenced)
+newMI_from_scrapMI_OI_df <- read_xlsx(path_experimental_data, sheet = "newMI_from_scrapMI_OI")%>%
+  mutate(parent_type = "scrapMI_OI") %>%
+  # remove dyads (we do not know the ploidy of the spores)
+  filter(nb_spores_ascus != "2")
+
+# create the complete dataframe
+new_MI_df <- bind_rows(newMI_from_scrapOI_df, newMI_from_scrapMI_OI_df) %>%
+  mutate(ascus=str_remove_all(mymi_id,"[a-z]$"),               # id of the ascus
+         parent=factor(str_remove_all(mymi_id,"\\..*$")))      # id of the isolate
+
+remove(newMI_from_scrapOI_df, newMI_from_scrapMI_OI_df)
+
+# display data
+new_MI_df
+```
+### Experiment description
+```{r}
+# experiment description 
+summary_newMI_experiment <- new_MI_df %>%
+  group_by(parent, parent_type) %>%
+  summarise(
+    nb_dissected_spores = n(),
+    nb_dissected_asci = ascus %>% unique() %>% length(), 
+    nb_genotyped_MyMI = nb_dissected_spores - sum(is.na(MAT_genotype)), 
+    nb_respoTest_MyMI = nb_dissected_spores - sum(is.na(sporulation))) %>%
+  mutate(creation_MI = case_when(
+    nb_genotyped_MyMI > 0 ~ "Yes", 
+    TRUE ~ "No") %>% as.factor())
+```
+```{r}
+# display values
+summary_newMI_experiment %>% arrange(parent_type)
+
+summary_newMI_experiment %>% 
+  filter(nb_genotyped_MyMI > 0) %>%
+  group_by(parent_type) %>% 
+  summarise(
+    min_nb_dissected_asci = min(nb_dissected_asci), 
+    max_nb_dissected_asci = max(nb_dissected_asci), 
+    min_nb_dissected_spores = min(nb_dissected_spores), 
+    max_nb_dissected_spores = max(nb_dissected_spores), 
+    min_nb_genotyped_MyMI = min(nb_genotyped_MyMI), 
+    max_nb_genotyped_MyMI = max(nb_genotyped_MyMI)) 
+```  
+Between 5 and 40 tetrads were dissected per isolate, corresponding to 20 to 140 spores. Genotyping and resporulation tests were possible only when the some spores were viable and produced monosporic isolates.
+
+```{r}
+# clean
+remove(summary_newMI_experiment)
+```
+
+### Spore viability
+
+#### Global
+
+Compute the average spore viability, regardless of the tetrad pattern.
+
+```{r}
+# compute the germination 
+spViability_3d_df <- new_MI_df %>%
+  filter(is.na(germination_3days)==FALSE) %>%
+  select(c(mymi_id, ascus, parent, germination_3days)) %>%
+  group_by(parent, germination_3days) %>%
+  summarise(nb_spores=n()) %>%
+  pivot_wider(names_from=germination_3days,values_from=nb_spores) %>%
+  mutate_if(is.numeric, replace_na, replace = 0) %>%
+  rename(nb_germinated_spores_3d=Yes,
+         nb_nongerminated_spores_3d=No) %>%
+  mutate(total_nb_spores=nb_germinated_spores_3d+nb_nongerminated_spores_3d,
+    germination_freq_3d=nb_germinated_spores_3d/total_nb_spores) 
+
+# display
+spViability_3d_df %>%
+  arrange(germination_freq_3d)
+```
+BFH and JXXY161 have unviable spores and cannot be tested. 
+
+#### Per ascus
+
+Compute the number of viable spore per dissected tetrad. 
+
+```{r}
+spViability_per_tetrad_3d_df <- new_MI_df %>%
+  # keep only tetrads
+  filter(nb_spores_ascus == "4") %>%
+  group_by(parent, ascus, germination_3days) %>%
+  summarise(nb_spores=n()) %>%
+  pivot_wider(names_from=germination_3days,values_from=nb_spores, values_fill = 0) %>%
+  rename(nb_germinated_spores_3d=Yes,
+         nb_nongerminated_spores_3d=No) %>%
+  mutate(nb_germinated_spores_3d = factor(nb_germinated_spores_3d, levels=c(0, 1, 2, 3, 4))) 
+
+# display
+spViability_per_tetrad_3d_df 
+```
+
+```{r}
+# per ascus and per isolate
+spViability_per_tetrad_3d_short_df <- spViability_per_tetrad_3d_df %>% 
+  arrange(nb_germinated_spores_3d) %>%
+  rowwise() %>%
+  mutate(nbViableSpores = paste0("nb_tetrads_", nb_germinated_spores_3d, "_viableSpores")) %>%
+  group_by(parent, nbViableSpores) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = nbViableSpores, values_from = n, values_fill = 0) %>%
+  mutate(nb_dissected_tetrads = nb_tetrads_4_viableSpores +  nb_tetrads_3_viableSpores + nb_tetrads_2_viableSpores + nb_tetrads_1_viableSpores + nb_tetrads_0_viableSpores) %>%
+  select(c(nb_dissected_tetrads, nb_tetrads_4_viableSpores, nb_tetrads_3_viableSpores, nb_tetrads_2_viableSpores, nb_tetrads_1_viableSpores, nb_tetrads_0_viableSpores))
+  
+
+spViability_per_tetrad_3d_short_df
+```
+
+### MAT genotyping and thallism
+
+```{r}
+# compute thallism
+thallism_newMI <- new_MI_df %>%
+  filter(is.na(MAT_genotype) == FALSE) %>%
+  group_by(parent, parent_type) %>%
+  summarise(nb_genotyped_newMI = n(), 
+            nb_2mat_newMI = sum(MAT_genotype == "a/alpha"),
+            propswitch_newMI = nb_2mat_newMI / nb_genotyped_newMI) %>%
+  mutate(thallism_newMI = case_when(
+    # not enough data
+    nb_genotyped_newMI <= 3 ~ NA,
+    # to be a homothallic, you need to have less than 1 heterothallic MI or less than 10% heterothallic MI
+    propswitch_newMI >= 0.9 | propswitch_newMI >= 1 - (1/nb_genotyped_newMI)  ~ "homothallic",
+    # to be a heterothallic, you need to have less than 1 homothallic MI or less than 10% homothallic MI
+    propswitch_newMI <= 0.1 | propswitch_newMI <= 1/nb_genotyped_newMI ~ "heterothallic",
+    # remaining are mixed
+    (propswitch_newMI < 0.9 | propswitch_newMI < 1 - (1/nb_genotyped_newMI)) & (propswitch_newMI > 0.1 | propswitch_newMI > 1/nb_genotyped_newMI) ~ "mixed", 
+    TRUE ~ NA))
+
+# display
+thallism_newMI 
+```  
+  
+```{r}
+thallism_newMI %>%
+  group_by(thallism_newMI, parent_type) %>%
+  summarise(n = n()) %>%
+  pivot_wider(names_from = parent_type, values_from = n, values_fill = 0) %>%
+  mutate(total = scrapOI + scrapMI_OI)
+```  
+
+### Re-sporulation
+```{r}
+# compute resporulation
+respo_newMI <- new_MI_df %>%
+  filter(is.na(sporulation) == FALSE) %>%
+  group_by(parent) %>%
+  summarise(nb_respoTested_newMI = n(), 
+            nb_respo_newMI = sum(sporulation == "Yes"),
+            proprespo_newMI = nb_respo_newMI / nb_respoTested_newMI) %>%
+  mutate(respo_newMI = case_when(
+    # not enough data
+    nb_respoTested_newMI <= 3 ~ NA,
+    proprespo_newMI >= 0.9 | proprespo_newMI >= 1 - (1/nb_respoTested_newMI)  ~ "resporulation",
+    proprespo_newMI <= 0.1 | proprespo_newMI <= 1/nb_respoTested_newMI ~ "no_resporulation",
+    # remaining are mixed
+    (proprespo_newMI < 0.9 | proprespo_newMI < 1 - (1/nb_respoTested_newMI)) & (proprespo_newMI > 0.1 | proprespo_newMI > 1/nb_respoTested_newMI) ~ "mix_resporulation", 
+    TRUE ~ NA))
+
+# display
+respo_newMI %>%
+  arrange(respo_newMI)
+```  
+  
+```{r}
+respo_newMI %>%
+  group_by(respo_newMI) %>%
+  summarise(n = n())
+```  
+
+### Merge data about new MI
+
+```{r}
+# merge
+new_MI_analyses_df <- full_join(spViability_3d_df, spViability_per_tetrad_3d_short_df, by= "parent") %>%
+  full_join(thallism_newMI, by = "parent") %>%
+  full_join(respo_newMI, by = "parent") %>%
+  mutate(sporeViab = case_when(
+    germination_freq_3d < 0.05 ~ "No", 
+    TRUE ~ "Yes"))
+
+# display 
+new_MI_analyses_df
+```  
+
+```{r}
+# display summary
+new_MI_analyses_df %>%
+  group_by(thallism_newMI, respo_newMI) %>%
+  mutate(isolates = paste0(parent, collapse = " ")) %>%
+  group_by(thallism_newMI, respo_newMI, isolates) %>%
+  summarise(nb_isolates = n()) %>%
+  select(nb_isolates,thallism_newMI, respo_newMI, isolates) %>%
+  arrange(desc(nb_isolates)) 
+```  
+
+```{r}
+# merge
+scrap_df_3 <- scrap_df_2  %>%
+  left_join(new_MI_analyses_df, by = join_by(original_isolate_id == parent))
+
+# display 
+scrap_df_3
+``` 
+
+```{r}
+# clean
+remove( new_MI_analyses_df, scrap_df_2, 
+       spViability_3d_df, spViability_per_tetrad_3d_short_df, thallism_newMI, respo_newMI)
+``` 
+
+## Conclusion about thallism
+
+```{r}
+scrap_df_3 %>%
+  group_by(thallism_scrapOI, thallism_scrapMI, thallism_newMI) %>%
+  mutate(isolates = paste0(scrap_id, collapse = " ")) %>%
+  group_by(isolates, thallism_scrapOI, thallism_scrapMI, thallism_newMI) %>%
+  summarise(nb_isolates = n()) %>%
+  select(c(nb_isolates, thallism_scrapOI, thallism_scrapMI, thallism_newMI, isolates)) 
+``` 
+
+```{r}
+# create a single thallism variable from all the experiments
+scrap_df_4 <- scrap_df_3 %>%
+  rowwise() %>%
+  mutate(thallism = case_when(
+    is.na(thallism_scrapOI) == FALSE  ~ thallism_scrapOI, 
+    is.na(thallism_newMI) == FALSE ~ thallism_newMI,
+    is.na(thallism_scrapMI) == FALSE  ~ thallism_scrapMI, 
+    TRUE ~ "unknown"))  
+
+scrap_df_4 %>%
+  group_by(thallism) %>%
+  mutate(isolates = paste(scrap_id, collapse = " ")) %>%
+  group_by(thallism, isolates) %>%
+  summarise(number_isolates = n()) %>%
+  select(c(number_isolates, thallism, isolates)) 
+``` 
+
+```{r}
+scrap_df_4 %>%
+  select(scrap_id,MAT_scrapOI,sporulation_OI,very_rare_sporulation_OI,dyads_only_OI,thallism_scrapOI,MAT_scrapMI,thallism_scrapMI,resporulation_scrapMI,dubious_result_scrapMI,MAT_scrapMI_OI,sporulation_scrapMI_OI,original_isolate_id,nb_nongerminated_spores_3d,nb_germinated_spores_3d,total_nb_spores,germination_freq_3d,nb_dissected_tetrads,nb_tetrads_4_viableSpores,nb_tetrads_3_viableSpores,nb_tetrads_2_viableSpores,nb_tetrads_1_viableSpores,nb_tetrads_0_viableSpores,parent_type,nb_genotyped_newMI,nb_2mat_newMI,propswitch_newMI,thallism_newMI,nb_respoTested_newMI,nb_respo_newMI,proprespo_newMI,respo_newMI,sporeViab,thallism) %>%
+  write_csv(scrap_thallism_from_screen_path)
+``` 
+
+
+
+```{r}
+rm(scrap_df_3)
+``` 
+
+## Plots
+
+```{r}
+p_summary_mat <- ggplot(scrap_df_4 %>%
+         mutate(
+           MAT = case_when(
+           sequencing_category == "monosporic" ~ MAT_scrapMI, 
+           TRUE ~ MAT_scrapOI) %>%
+             replace_na("untested"),
+
+         sequencing_category = case_when(
+             sequencing_category == "monosporic" ~ "monosporic isolates", 
+             TRUE ~ "other strains"))
+           ) +
+  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), fill = factor(MAT, levels=c("untested", "a","alpha", "a/alpha")))) +
+  facet_grid(sequencing_category ~ . ) +
+  myTheme()  +
+  scale_fill_manual(values=c("grey90", "#0192B0", "#CC6677","#332288"), na.value = "grey90") +
+  labs( x = "ploidy", y = "number of strains", fill = "MAT") +
+  theme(legend.position = c(1, 1),
+    legend.justification = c(1.1, 1.1)) 
+
+p_summary_mat
+```
+
+```{r}
+p_summary_thallism <- ggplot(scrap_df_4 %>%
+         mutate(sequencing_category = case_when(
+             sequencing_category == "monosporic" ~ "monosporic isolates", 
+             TRUE ~ "other strains"))) +
+  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), fill = factor(thallism, levels=c("unknown", "mixed","heterothallic","homothallic")))) +
+  facet_grid(sequencing_category ~ . ) +
+  myTheme()  +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "mixed" = "#f89c4f", "heterothallic" = "#661100", "unknown" = "gray90"), na.value = "grey90") +
+  labs( x = "ploidy", y = "number of strains", fill = "thallism") +
+  theme(legend.position = c(1, 1),
+    legend.justification = c(1.1, 1.1)) 
+
+p_summary_thallism
+```
+```{r}
+plot_spacer_clean <- plot_spacer() + theme_void()
+plot_grid(
+  p_summary_mat,
+  plot_spacer_clean,
+  p_summary_thallism,
+  labels = c("A", "", "B"),  
+  ncol = 3,
+  rel_widths = c(1, 0.05, 1)
+)
+```
+
+### Figure 1C
+```{r}
+table_for_fig_1C <- scrap_df_4 %>%
+  filter(thallism %in% c("mixed","heterothallic","homothallic"))
+```
+  
+```{r}
+p_screen_result <- 
+ ggplot(table_for_fig_1C %>%
+         mutate(sequencing_category = case_when(
+             sequencing_category == "monosporic" ~ "45 monosporic isolates", 
+             TRUE ~ "32 original strains"))) +
+  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), fill = factor(thallism, levels=c("mixed","heterothallic","homothallic"))), color = "black") +
+  facet_grid(sequencing_category ~ . ) +
+  myTheme()  +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "mixed" = "#f89c4f", "heterothallic" = "#661100")) +
+  labs( x = "ploidy", y = "number of strains", fill = "thallism") 
+
+p_screen_result
+```
+```{r}
+remove(new_MI_df, p_summary_mat_MI, p_summary_thallism_MI, spViability_per_tetrad_3d_df, scrapMI_OI_df, table_for_fig_1C)
+```
+
+# Molecular complementation assay
+
+```{r}
+# load the results from the complementation test 
+complementation <- read_xlsx(path_experimental_data, sheet = "rescue_pHS2") 
+# display
+complementation
+```
+
+## Identification of the causes of the heterothallic phenotype
+```{r}
+complementation_clean <- complementation %>%
+  
+  # creates new variables
+  mutate(
+  
+    # is the untransformed isolate a new monosporic isolate or the original isolate of the scrap collection?
+    untransformed_type = case_when(
+      str_detect(id_untransformed, "\\.") ~ "newmi", 
+      TRUE ~ "scrap_isolate"), 
+    
+    # if the parent a monosporic isolate, from which original isolate of the scrap collection?
+    scrap_id = case_when(
+      untransformed_type == "scrap_isolate" ~ id_untransformed, 
+      untransformed_type == "newmi" ~ str_split_i(id_untransformed, "\\.", 1)), 
+    subid = case_when( # define each monosporic isolate by its ascus/spore id
+      untransformed_type == "scrap_isolate" ~  " ", 
+      untransformed_type == "newmi" ~ str_split_i(id_untransformed, "\\.", 2)), 
+    
+    # results of the complementation assay
+    complementation_result = case_when( 
+          # both clones are a/alpha: successful complementation
+           MAT_genotype_tr1 == "a/alpha" & MAT_genotype_tr2 == "a/alpha" ~ "complementation",
+           # both clones changed mating type but did not became a/alpha: partial complementation
+           MAT_genotype_tr1 != MAT_genotype_untransformed & MAT_genotype_tr2 != MAT_genotype_untransformed ~ "partial complementation",
+           # both clones have the same mating type than the untransformed isolate: no complementation
+           MAT_genotype_tr1 == MAT_genotype_untransformed & MAT_genotype_tr2 == MAT_genotype_untransformed ~ "no complementation",
+           TRUE ~ NA) %>% 
+      factor(levels = c("complementation", "partial complementation", "no complementation")), 
+    
+    # HO was nonfunctional if there is a (partial) complementation
+    HO_functionality = case_when(
+      complementation_result %in% c("complementation", "partial complementation") ~ "nonfunctional",
+      TRUE ~ "unknown"), 
+
+    # there are other factors if there is no full complementation
+    additionnal_causes_nonswitch = case_when(
+      complementation_result %in% c("partial complementation", "no complementation") ~ "add_cause",
+      complementation_result == "complementation" ~ "no_add_cause",
+      TRUE ~ "unknown"))  %>%
+
+  # When experiment was done on several monosporic isolates, 
+  group_by(scrap_id) %>%
+  mutate(
+    
+    # summary complementation result
+    complementation_result_scrap_isolate = case_when(
+       untransformed_type == "scrap_isolate" ~ complementation_result,
+       any(complementation_result == "partial complementation") ~ "partial complementation", 
+       any(complementation_result == "complementation") ~ "complementation", 
+       any(complementation_result == "no complementation") ~ "no complementation", 
+       TRUE ~ NA) %>% 
+      factor(levels = c("complementation", "partial complementation", "no complementation")), 
+             
+    # HO is non functional is it was found non functional in one monosporic isolate
+    HO_functionality_scrap_isolate = case_when(
+      untransformed_type == "scrap_isolate" ~ HO_functionality, 
+      any(HO_functionality == "nonfunctional") ~ "nonfunctional", 
+      TRUE ~ "unknown"), 
+    # There is an additional cause to non-switching if it was found if one monosporic isolate 
+    additionnal_causes_nonswitch_scrap_isolate = case_when(
+      untransformed_type == "scrap_isolate" ~ additionnal_causes_nonswitch, 
+      any(additionnal_causes_nonswitch == "add_cause") ~ "add_cause", 
+      all(additionnal_causes_nonswitch == "unknown") ~ "unknown", 
+      TRUE ~"no_add_cause")) %>%
+  ungroup()
+  
+# display
+complementation_clean %>%
+  select(c(id_untransformed, MAT_genotype_untransformed, MAT_genotype_tr1, MAT_genotype_tr2, complementation_result, HO_functionality, additionnal_causes_nonswitch, complementation_result_scrap_isolate, HO_functionality_scrap_isolate, additionnal_causes_nonswitch_scrap_isolate)) %>%
+  arrange(additionnal_causes_nonswitch) %>%
+  arrange(HO_functionality) 
+```     
+
+```{r}
+# analyses per ScRAP isolate
+scrap_complementation <- complementation_clean %>%
+  select(scrap_id, complementation_result_scrap_isolate, HO_functionality_scrap_isolate, additionnal_causes_nonswitch_scrap_isolate) %>%
+  rename(
+    complementation_result = complementation_result_scrap_isolate, 
+    HO_functionality = HO_functionality_scrap_isolate, 
+    additionnal_causes_nonswitch = additionnal_causes_nonswitch_scrap_isolate) %>%
+  unique()
+```
+
+
+```{r}
+# numbers
+scrap_complementation %>% 
+  group_by(HO_functionality, additionnal_causes_nonswitch) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = additionnal_causes_nonswitch, , values_from =  n, values_fill = 0) %>%
+  mutate(total = sum(c_across(is.numeric)))
+```
+
+```{r}
+# save the results
+write_csv(scrap_complementation, scrap_complementation_path)
+```
+
+## Plots
+
+### Scrap isolates
+
+```{r}
+# prepare data for the plot
+complementation_clean_OI_complemented <- complementation_clean %>%
+  filter(untransformed_type == "scrap_isolate") %>%
+  mutate(recovery = case_when(
+    complementation_result_scrap_isolate  == "complementation" ~ "Yes", 
+     complementation_result_scrap_isolate  == "partial complementation" ~ "Partial",
+     complementation_result_scrap_isolate  == "no complementation" ~ "No")) %>%
+  group_by(complementation_result_scrap_isolate) %>%
+  arrange(complementation_result_scrap_isolate, by_group = TRUE) 
+
+scrap_id_ordered_OI_complemented = unique(complementation_clean_OI_complemented$scrap_id)
+```   
+
+
+```{r}
+p_transfo_OI <- ggplot(complementation_clean_OI_complemented) +
+  geom_segment(aes(x=as.numeric(factor(id_untransformed)), y = 2.5, xend = as.numeric(factor(id_untransformed)) - 0.25, yend = 1.5), color = "grey30", size = 0.5) +
+  geom_segment(aes(x=as.numeric(factor(id_untransformed)), y = 2.5, xend = as.numeric(factor(id_untransformed)) + 0.25, yend = 1.5), color = "grey30", size = 0.5) +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)), fill = factor(MAT_genotype_untransformed, levels=c("a","alpha", "a/alpha"))), size = 4, y = 2.5, shape = 21, color = "transparent") +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) - 0.25, fill = factor(MAT_genotype_tr1, levels=c("a","alpha", "a/alpha"))), size = 4, y = 1.5,  shape = 21, color = "transparent") +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) + 0.25, fill = factor(MAT_genotype_tr2, levels=c("a","alpha", "a/alpha"))), size = 4, y = 1.5,  shape = 21, color = "transparent") +
+  
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) - 0.5), y = 2.5, fill = "transparent", color = "transparent") +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) + 0.5), y = 2.5, fill = "transparent", color = "transparent") +
+  
+  geom_text(aes(x = as.numeric(factor(id_untransformed)), label = recovery, color = recovery), y = 1, size = 3, fontface = "bold") + 
+  
+  myTheme() +
+  scale_fill_manual(values=c("a" = "#0192B0" , "alpha" = "#CC6677", "a/alpha" = "#332288"), na.value = "transparent") +
+    scale_color_manual(values = c("Yes" = "#c2f9c9" , "Partial" = "#f89c4f", "No" = "#661100")) +
+  facet_grid( . ~ factor(scrap_id, levels = scrap_id_ordered_OI_complemented), scale = "free_x", space = "free_x") +
+  scale_y_continuous(
+    limits = c(0.8, 2.7),
+    breaks = c(1, 1.5, 2, 2.5), 
+    labels = c("homothallism\nrecovery", "transformants", "+ pHS2",  "untransformed\nisolate")) +
+  theme(axis.text.x= element_blank(), 
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        panel.spacing = unit(2, 'points'),
+        strip.text = element_text(size = 7),
+        panel.grid = element_blank(), 
+        legend.position = "right") +
+  guides(color = "none", fill = "none") +
+  labs(y = "", fill = "MAT") 
+  
+p_transfo_OI
+```
+### MyMI
+```{r}
+# prepare data for the plot
+complementation_clean_myMI <- complementation_clean %>%
+  filter(untransformed_type != "scrap_isolate") %>%
+  mutate(recovery = case_when(
+    complementation_result_scrap_isolate  == "complementation" ~ "Yes", 
+     complementation_result_scrap_isolate  == "partial complementation" ~ "Partial",
+     complementation_result_scrap_isolate  == "no complementation" ~ "No")) %>%
+  arrange(complementation_result_scrap_isolate) 
+
+scrap_id_ordered_myMI = unique(complementation_clean_myMI$scrap_id)
+```   
+
+```{r}
+recovery_complementation_clean_myMI <- complementation_clean_myMI %>% 
+  select(scrap_id, recovery, id_untransformed) %>%
+  mutate(order = factor(id_untransformed) %>% as.numeric) %>%
+  group_by(scrap_id) %>%
+  mutate(pos = mean(order)) %>%
+  select(scrap_id, recovery, pos) %>%
+  unique()
+
+
+# plot for the new monosporic isolates
+p_transfo_MI <- ggplot(complementation_clean_myMI) +
+  geom_text(aes(x=as.numeric(factor(id_untransformed)), y = 2.65, label = subid), color = "grey30", size = 2) +
+  geom_segment(aes(x=as.numeric(factor(id_untransformed)), y = 2.5, xend = as.numeric(factor(id_untransformed)) - 0.25, yend = 1.5), color = "grey30", size = 0.5) +
+  geom_segment(aes(x=as.numeric(factor(id_untransformed)), y = 2.5, xend = as.numeric(factor(id_untransformed)) + 0.25, yend = 1.5), color = "grey30", size = 0.5) +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)), fill = factor(MAT_genotype_untransformed, levels=c("a","alpha", "a/alpha"))), size = 4, y = 2.5, shape = 21, color = "transparent") +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) - 0.25, fill = factor(MAT_genotype_tr1, levels=c("a","alpha", "a/alpha"))), size = 4, y = 1.5,  shape = 21, color = "transparent") +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) + 0.25, fill = factor(MAT_genotype_tr2, levels=c("a","alpha", "a/alpha"))), size = 4, y = 1.5,  shape = 21, color = "transparent") +
+  
+  
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) - 0.5), y = 2.5, fill = "transparent", color = "transparent") +
+  geom_point(aes(x=as.numeric(factor(id_untransformed)) + 0.5), y = 2.5, fill = "transparent", color = "transparent") +
+  
+  facet_grid( . ~ factor(scrap_id, levels = scrap_id_ordered_myMI), scale = "free_x", space = "free_x") +
+  
+  geom_text(data = recovery_complementation_clean_myMI, aes(x = pos, label = recovery,  color = recovery), y = 1, size = 3, fontface = "bold", inherit.aes = FALSE) +
+  
+    myTheme() + 
+  scale_fill_manual(values=c("a" = "#0192B0" , "alpha" = "#CC6677", "a/alpha" = "#332288"), na.value = "transparent", na.translate = FALSE) +
+    scale_color_manual(values = c("Yes" = "#c2f9c9" , "Partial" = "#f89c4f", "No" = "#661100")) +
+  
+  scale_y_continuous(
+    limits = c(0.8, 2.7),
+    breaks = c(1, 1.5, 2, 2.5), 
+    labels = c("homothallism\nrecovery", "transformants", "+ pHS2",  "untransformed\nisolate")) +
+  theme(axis.text.x= element_blank(), 
+        axis.ticks = element_blank(),
+        axis.title = element_blank(),
+        strip.text = element_text(size = 7),
+        panel.spacing = unit(2, 'points'),
+        panel.grid = element_blank()) +
+  guides(color = "none") +
+  labs(y = "", fill = "MAT") 
+
+p_transfo_MI
+```
+
+
+### Supplementary Figure 2
+
+```{r}
+suppfigure2 <- plot_grid(
+  p_transfo_OI,
+  p_transfo_MI,
+  labels = c("A", "B"),
+  ncol = 1)
+
+suppfigure2
+
+ggsave(suppfig2_path, width = 11, height = 6)
+```
+
+
+```{r}
+scrap_complementation_for_fig_1D <- scrap_complementation %>%
+  left_join(scrap_df_4) %>%
+mutate(recovery = case_when(
+                      complementation_result=="complementation" ~ "full", 
+                      complementation_result=="partial complementation" ~ "partial", 
+                      complementation_result=="no complementation" ~ "no") %>%
+                        factor(levels = c("full", "partial", "no")), 
+       HO_funct = case_when(
+         recovery != "no" ~"ho-", 
+         TRUE ~ "unknown"),
+      cassettes = case_when(
+        nb_HMR_cat == "none" & nb_HML_cat == "none" ~ "no HMR, no HML", 
+        nb_HMR_cat == "none" & nb_HMLa > 0 ~ "no HMR, HMLa", 
+        nb_HMLa > 0 ~ "HMLa",
+        nb_HMR_cat == "none" ~ "no HMR",
+        nb_HML_cat == "none" ~ "no HML",
+        TRUE ~ NA) %>%
+        factor(levels = c("no HMR, no HML", "no HML", "no HMR, HMLa", "HMLa", NA)))
+
+scrap_complementation_for_fig_1D %>% 
+  select(scrap_id, recovery, HO_funct, cassettes)
+  
+```
+
+### Figure 1D
+```{r}
+sumup_complementation_p <- ggplot(scrap_complementation_for_fig_1D, aes(x=recovery)) +
+  geom_bar_pattern(
+    aes(fill = cassettes, pattern = HO_funct),
+    pattern_density = 0.01,
+    colour          = 'black') +
+  myTheme() +
+  scale_fill_manual(values=c("HMLa" = "#99DDFF",  "no HML" = "#CC6677", "no HMR, HMLa" =  "#0192B0",  "no HMR, no HML" = "#806cb4"), na.value = "transparent", na.translate = FALSE) +
+  scale_pattern_manual(values = c("unknown" = "none", "ho-" = "stripe"), na.value = "none") +
+  labs(y = "number of heterothallic strains", x = "HO complementation", pattern = "HO functionality") +
+  guides(
+    fill = guide_legend(override.aes = list(pattern = "none", color = "black")), 
+    pattern = guide_legend(override.aes = list(fill = "transparent", color = "black")))
+
+sumup_complementation_p
+```
+
+```{r}
+sumup_complementation_p <- ggplot(scrap_complementation_for_fig_1D, aes(x=recovery)) +
+  geom_bar(aes(fill = cassettes), color = "black") +
+  myTheme() +
+  scale_fill_manual(values=c("HMLa" = "#99DDFF",  "no HML" = "#CC6677", "no HMR, HMLa" =  "#0192B0", "no HMR, no HML" = "#806cb4"), na.value = "transparent", na.translate = FALSE) +
+  labs(y = "number of heterothallic strains", x = "HO complementation") 
+
+sumup_complementation_p
+```
+# Figure 1
+```{r}
+# import the schematics
+fig1A_pdf <- image_read_pdf(fig_1A_path, density = 300)
+fig1A_plot <- ggdraw() + draw_image(fig1A_pdf)
+fig1B_pdf <- image_read_pdf(fig_1B_path, density = 300)
+fig1B_plot <- ggdraw() + draw_image(fig1B_pdf)
+```
+```{r}
+
+fig1CD <-  plot_grid(
+  p_screen_result,
+  sumup_complementation_p,
+  labels = c("C", "D"),  
+  ncol = 2, 
+  rel_widths = c(1, 1)
+)
+
+fig1CD
+
+
+fig1BCD <-  plot_grid(
+  fig1B_plot,
+  fig1CD,
+  labels = c("B", ""),  
+  align = "v",
+  ncol = 1, 
+  rel_heights = c(1,0.8)
+)
+fig1BCD
+
+figure_1 <- plot_grid(
+  fig1A_plot,
+  fig1BCD,
+  labels = c("A", ""),  
+  ncol = 2, 
+  rel_widths = c(1, 1.1)
+)
+
+figure_1
+
+ggsave(figure_1_path, figure_1, width = 15, height = 8)
+```
+
+
+
