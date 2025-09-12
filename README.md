@@ -33,7 +33,7 @@ All scripts are in the folder `01_scripts`. They should be run in the order indi
 
 Input data are in the `02_data` folder. A `README.md` file in this folder describes the origin of each file.
 
-## Licence 
+## License 
 
 GNU GENERAL PUBLIC LICENSE v.3
 
