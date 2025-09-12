@@ -18,14 +18,14 @@ Metadata downloaded from https://www.nature.com/articles/s41586-018-0030-5#Sec40
 
 ## 03. 3,034 Genomes Panel
 
-### 01. Metadata (Tfile able_S1_G3-2024-405400.xlsx)
+### 01. Metadata (file Table_S1_G3-2024-405400.xlsx)
 Metadata downloaded from https://academic.oup.com/g3journal/article/14/12/jkae245/7904545#supplementary-data (supplementary data from  Loegler V, Friedrich A, Schacherer J. Overview of the Saccharomyces cerevisiae population structure through the lens of 3,034 genomes. G3 GenesGenomesGenetics. 2024;14: jkae245. doi:10.1093/g3journal/jkae245)
 
 ### 02. Ecological Niches
-For each strain, an ecological niche was attributed based on the keywords of the "Isolation" description (see keywords in the Materials and Methods section), using the methodology developped in Ollivier et al. (in prep.).
+For each strain, an ecological niche was attributed based on the keywords of the "Isolation" description (see keywords in the Materials and Methods section of the paper).
 
 ### 03. vcf filtered for HO (folder vcf_filter_HO)
-- The VCF file of the HO locus (chromosome 4, positions 46271 to 48031) from the 3,034GP (Loegler et al. 2024)was provided by Jing Hou (Université de Strasbourg, CNRS, GMGM UMR 7156, Strasbourg, France). 
+- The VCF file of the HO locus (chromosome 4, positions 46271 to 48031) from the 3,034GP (Loegler et al. 2024) was provided by Jing Hou (Université de Strasbourg, CNRS, GMGM UMR 7156, Strasbourg, France). 
 - the reference genome of S288C used for the VCF is in fna format in the same folder, from the Zenodo repository of Loegler et al. 2024 (https://doi.org/10.5281/zenodo.12580561). 
 
 
@@ -58,4 +58,4 @@ HOcds_in_pHS2.fasta: coding sequence of HO in the pHS2 plasmid.
 
 
 ## 06 Figures
-Figures built manually (schematics, annotated HO network)
+Figures built manually (schematics, annotated HO network).
