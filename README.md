@@ -1,3 +1,5 @@
+# Repeated losses of self-fertility in _Saccharomyce cerevisiae_ evolution
+
 ## Description
 
 This repository contains the data and scripts for the analyses presented in Vittorelli Nina, Gómez-Muñoz Cintia, Andriushchenko Irina, Ollivier Louis, Agier Nicolas, Delmas Stéphane, Corbeau Yann, Achaz Guillaume, Cosentino Lagomarsino Marco, Liti Gianni, Llorente Bertrand, Fischer Gilles, "Repeated losses of self-fertility shaped heterozygosity and polyploidy in yeast evolution".
@@ -7,7 +9,7 @@ This repository contains the data and scripts for the analyses presented in Vitt
 First, download the repository with the download button, or clone it using the following command in your terminal.
 
 ```bash
-git clone 
+git clone https://github.com/nina-vittorelli/Loss_SelfFertility_Scerevisiae.git
 ```
 
 Second, install [conda](https://anaconda.org/anaconda/conda) if not already installed. Then open a terminal, and run the following commands in order to install the conda environment.
@@ -27,12 +29,17 @@ Third, install [Rstudio](https://posit.co/downloads/) if not already installed. 
 
 ## Running the project
 
-All scripts are in the folder `01_scripts`. They should be run in the order indicated by the numbers in the file names. Bash and python scripts should be lauched from the terminal with the command indicated at the beginning of each file. R notebooks should be run within the Rproject. 
+All scripts are in the folder `01_scripts`. They should be run in the order indicated by the numbers in the files' names. Bash and python scripts should be lauched from the terminal with the command indicated at the beginning of each file. R notebooks should be run within the R project `Loss_SelfFertility_Scerevisiae.Rproj`. 
 
 Input data are in the `02_data` folder. A `README.md` file in this folder describes the origin of each file.
+
+## Licence 
+
+GNU GENERAL PUBLIC LICENSE v.3
 
 ## Author
 
 Written by Nina Vittorelli
+
 Contact: nina.vittorelli [at] sorbonne-universite.fr
 
