@@ -24,6 +24,7 @@ library(patchwork)
 library(cowplot)
 library(magick)
 library(ggpattern)
+library(pdftools)
 ```
 
 ```{r}
@@ -39,16 +40,16 @@ path_experimental_data <- "02_data/04_experimental_results/experiments.xlsx"
 path_MAT_HMR_HML <- "03_output/02_MAT_HMR_HML/scrap_HMR_HML_MAT_presence_storedY.csv"
 
 # shcematics to include in figure 1
-fig_1A_path <- "02_data/06_figures/figure_1A.pdf"
-fig_1B_path <- "02_data/06_figures/figure_1B.pdf"
+fig_1A_path <- "02_data/06_figures/Figure_1A.pdf"
+fig_1B_path <- "02_data/06_figures/Figure_1B.pdf"
 ```
 
 ```{r}
 ## OUTPUT 
 
 # figures
-suppfig2_path <- "03_output/figures/suppfigure_2.pdf"
-figure_1_path <- "03_output/figures/figure_1.pdf"
+fig_S3_path <- "03_output/figures/Figure_S3.pdf"
+figure_1_path <- "03_output/figures/Figure_1.pdf"
 
 # intermediary files
 scrap_thallism_from_screen_path <- "03_output/03_experimental_screen/scrap_thallism_from_screen.csv"
@@ -207,7 +208,17 @@ There are a few unexpected results:
 
 -   1 monosporic isolate has only one mating-type, but was annotated as diploid is the database: ALH_1b. This isolate can be considered heterothallic, because it maintains a stable alpha mating type. It is possible that this isolate underwent endoreduplication, without mating-type switching.
 
--   2 monosporic isolates are haploid according to ScRAP metadata, but they are a/alpha and they sporulate (CHS_3a and CPI_1c). Among our hypothesis: (1) our tube was contaminated or (2) they underwent rare mating-type switching between the sequencing and our experiments. We dissected new isolates from the same genetic background to conclude about these two isolates. For now, we consider their homothallism as dubious.
+-   2 monosporic isolates are haploid according to ScRAP metadata, but they are a/alpha and they sporulate (CHS_3a and CPI_1c). We dissected new isolates from the same genetic backgrounds and found that they all maintained a single mating type. These two isolates are heterothallic. Among our hypothesis: (1) our tube was contaminated or (2) they underwent rare mating-type switching between the sequencing and our experiments. We can look at their original mating type by investigating the MAT locus in their genome assembly. 
+
+```{r}
+# maybe the three non-sporulating homothallic have accumulated heterozygous mutations in sporulation genes? 
+scrapMI_complete_df %>% 
+  # keep the three non-sporulating homothallic
+  filter(switch == "yes", ploidy_scrap_isolate_corrected == 1) %>%
+  select(scrap_id, nb_MATa, nb_MATalpha)
+```
+
+Both CHS_3a and CPI_1c were originally MATa. 
 
 ```{r}
 # maybe the three non-sporulating homothallic have accumulated heterozygous mutations in sporulation genes? 
@@ -681,25 +692,27 @@ plot_grid(
 ### Figure 1C
 ```{r}
 table_for_fig_1C <- scrap_df_4 %>%
-  filter(thallism %in% c("mixed","heterothallic","homothallic"))
+  filter(thallism == "heterothallic") %>%
+  mutate(MAT = case_when(
+    scrap_id %in% c("CHS_3a", "CPI_1c") ~ "a",  # we correct for the original mating-type of CHS_3a and CPI_1c
+    !is.na(MAT_scrapMI) ~ MAT_scrapMI, 
+    TRUE ~ MAT_scrapOI))
 ```
-  
+
 ```{r}
 p_screen_result <- 
- ggplot(table_for_fig_1C %>%
-         mutate(sequencing_category = case_when(
-             sequencing_category == "monosporic" ~ "45 monosporic isolates", 
-             TRUE ~ "32 original strains"))) +
-  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), fill = factor(thallism, levels=c("mixed","heterothallic","homothallic"))), color = "black") +
-  facet_grid(sequencing_category ~ . ) +
+ ggplot(table_for_fig_1C) +
+  geom_bar(aes(x = factor(ploidy_scrap_isolate_corrected, levels = c(1,2,3,4)), fill = factor(MAT, levels=c("untested", "a","alpha", "a/alpha"))), color = "black") +
   myTheme()  +
-  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "mixed" = "#f89c4f", "heterothallic" = "#661100")) +
-  labs( x = "ploidy", y = "number of strains", fill = "thallism") 
+  theme(legend.position = c(0.75, 0.8)) +
+  scale_fill_manual(values = c("untested"="grey90", "a"="#0192B0", "alpha"="#CC6677","a/alpha"="#806cb4"), na.value = "grey90") +
+  labs(x = "ploidy", y = "number of heterothallic strains", fill = "MAT") 
 
 p_screen_result
 ```
+
 ```{r}
-remove(new_MI_df, p_summary_mat_MI, p_summary_thallism_MI, spViability_per_tetrad_3d_df, scrapMI_OI_df, table_for_fig_1C)
+remove(new_MI_df, p_summary_mat_MI, spViability_per_tetrad_3d_df, scrapMI_OI_df, table_for_fig_1C)
 ```
 
 # Molecular complementation assay
@@ -926,18 +939,18 @@ p_transfo_MI
 ```
 
 
-### Supplementary Figure 2
+### Figure S3
 
 ```{r}
-suppfigure2 <- plot_grid(
+fig_S3 <- plot_grid(
   p_transfo_OI,
   p_transfo_MI,
   labels = c("A", "B"),
   ncol = 1)
 
-suppfigure2
+fig_S3
 
-ggsave(suppfig2_path, width = 11, height = 6)
+ggsave(fig_S3_path, width = 11, height = 6)
 ```
 
 
@@ -988,6 +1001,7 @@ sumup_complementation_p
 sumup_complementation_p <- ggplot(scrap_complementation_for_fig_1D, aes(x=recovery)) +
   geom_bar(aes(fill = cassettes), color = "black") +
   myTheme() +
+    theme(legend.position = c(0.7, 0.7)) +
   scale_fill_manual(values=c("HMLa" = "#99DDFF",  "no HML" = "#CC6677", "no HMR, HMLa" =  "#0192B0", "no HMR, no HML" = "#806cb4"), na.value = "transparent", na.translate = FALSE) +
   labs(y = "number of heterothallic strains", x = "HO complementation") 
 
@@ -1001,40 +1015,38 @@ fig1A_plot <- ggdraw() + draw_image(fig1A_pdf)
 fig1B_pdf <- image_read_pdf(fig_1B_path, density = 300)
 fig1B_plot <- ggdraw() + draw_image(fig1B_pdf)
 ```
-```{r}
 
+```{r}
 fig1CD <-  plot_grid(
   p_screen_result,
   sumup_complementation_p,
   labels = c("C", "D"),  
   ncol = 2, 
-  rel_widths = c(1, 1)
+  rel_widths = c(1, 1.3)
 )
-
-fig1CD
 
 
 fig1BCD <-  plot_grid(
   fig1B_plot,
   fig1CD,
   labels = c("B", ""),  
-  align = "v",
   ncol = 1, 
-  rel_heights = c(1,0.8)
+  rel_heights = c(1, 1.3)
 )
-fig1BCD
+
 
 figure_1 <- plot_grid(
   fig1A_plot,
+  plot_spacer_clean,
   fig1BCD,
-  labels = c("A", ""),  
-  ncol = 2, 
-  rel_widths = c(1, 1.1)
+  labels = c("A", "", ""),  
+  ncol = 3, 
+  rel_widths = c(1.1, 0.01, 1)
 )
 
 figure_1
 
-ggsave(figure_1_path, figure_1, width = 15, height = 8)
+ggsave(figure_1_path, figure_1, width = 11.3, height = 6.5)
 ```
 
 

@@ -4,5 +4,7 @@
 .Rproj.user/
 .Rproj.user
 01_scripts/*.nb.html
+logs/*
+03_output
 .Ruserdata
 __pycache__/

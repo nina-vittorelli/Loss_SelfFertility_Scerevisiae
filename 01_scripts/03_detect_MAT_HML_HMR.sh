@@ -7,7 +7,7 @@
 # before running the script, activate the conda environment in your terminal with this command:
 # conda activate loss_selfFertility_Scerevisiae_env
 # To run this script:
-# nohup bash 01_scripts/03_detect_MAT_HML_HMR.sh 1>01_scripts/logs/log03a.txt 2>01_scripts/logs/log03b.txt &
+# nohup bash 01_scripts/03_detect_MAT_HML_HMR.sh 1>logs/log03a.txt 2>logs/log03b.txt &
 
 # Paths to access the files
 # Inputs

@@ -7,12 +7,12 @@
 # before running the script, activate the conda environment in your terminal with this command:
 # conda activate loss_selfFertility_Scerevisiae_env
 # To run this script:
-# nohup zsh 01_scripts/11_3039_HO_msa.sh 1>01_scripts/logs/log11a.txt 2>01_scripts/logs/log11b.txt &
+# nohup zsh 01_scripts/11_3039_HO_msa.sh 1>logs/log11a.txt 2>logs/log11b.txt &
 
 # Input
 PATH_REF_GENOME="02_data/03_3039GP/vcf_filtered_HO/Sace_S288c_reference_FullMatrixID.fna"
 PATH_VCF="02_data/03_3039GP/vcf_filtered_HO/full3039Matrix.chr4_46271-48031_filtered.vcf.gz"
-STRAINS_TO_REMOVE="03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
+STRAINS_TO_REMOVE="03_output/01_cleaned_panels/strains_to_exclude_3034GP.txt"
 REF_SEQ_PHS2="02_data/05_else/03_pHS2_sequence/HOcds_in_pHS2.fasta"
 
 # Output

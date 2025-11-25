@@ -1,0 +1,4 @@
+# ignore data and output folders
+02_data/
+03_output/
+logs/

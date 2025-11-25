@@ -44,15 +44,15 @@ path_3034_suptable <- "02_data/03_3039GP/Table_S1_G3-2024-405400.xlsx"
 ## OUTPUT 
 
 # tables
-path_assemblies_with_artificial_deletion_df <- "03_output/tables/supptable2_scrap_assemblies_with_markers.csv"
+path_assemblies_with_artificial_deletion_df <- "03_output/tables/Dataset_S2_scrap_assemblies_with_markers.csv"
 
 # figures
-path_plot_type_ploidy_zygosity_scrap <- "03_output/figures/suppfigure_1.pdf"
-path_plot_ploidy_zygosity_3039 <- "03_output/figures/suppfigure_7.pdf"
+path_plot_type_ploidy_zygosity_scrap <- "03_output/figures/Figure_S1.pdf"
+path_plot_ploidy_zygosity_3039 <- "03_output/figures/Figure_S8.pdf"
 
 # intermediary files
 scrap_clean_path <- "03_output/01_cleaned_panels/scrap_clean.csv"
-path_strains_with_HO_deletion_3034GP <- "03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
+path_strains_to_exclude <- "03_output/01_cleaned_panels/strains_to_exclude_3034GP.txt"
 df_3039_clean_path <- "03_output/01_cleaned_panels/3039_clean.csv"
 
 # creates the directories for the outputs
@@ -126,7 +126,7 @@ artificial_cassettes_df <- full_join(TEFprom_blast_df, markers_only_df) %>%
 artificial_cassettes_df %>%
   arrange(contiguity)
 ```
-Manual checks for the two assemblies with putative non-contigous cassettes: 
+Manual checks for the two assemblies with putative non-contiguous cassettes: 
 
 - The chrIX of CBK contains two artificial deletions (one with KanR and one with HygR resistance). 
 
@@ -164,7 +164,7 @@ assemblies_with_artificial_deletion_df <- artificial_cassettes_df %>%
 # display
 assemblies_with_artificial_deletion_df
 ```
-### Supplementary Table 2
+### Dataset S2
 ```{r}
 # save
 write_csv(assemblies_with_artificial_deletion_df, path_assemblies_with_artificial_deletion_df)
@@ -487,7 +487,8 @@ plot_type_ploidy_scrap <- ggplot(scrap_df_corrected_2) +
 
 plot_type_ploidy_scrap
 ```
-### Supplementary Figure 1
+### Figure S1
+
 ```{r}
 plot_type_ploidy_zygosity_scrap <- ggplot(scrap_df_corrected_2 %>%
          mutate(sequencing_category = case_when(
@@ -533,8 +534,6 @@ df_1011 <- read_excel(path_1011_suptable,
 # strains with artificial deletion
 strains_with_HO_deletion <- df_1011$`Standardized name`[df_1011$`HO deletion` == "yes"]
 length(strains_with_HO_deletion)
-
-writeLines(strains_with_HO_deletion, path_strains_with_HO_deletion_3034GP)
 ```
 
 ```{r}
@@ -554,24 +553,29 @@ df_3039_raw <- read_excel(
 nrow(df_3039_raw)
 ```
 ```{r}
+ # remove strains with missing information about zygosity
+strains_with_missing_Zygosity <- df_3039_raw$StandardizedName[df_3039_raw$Zygosity == "NA"]
+strains_with_missing_Zygosity
+strains_to_exclude <- c(strains_with_HO_deletion, strains_with_missing_Zygosity)
+
+writeLines(strains_to_exclude, path_strains_to_exclude)
+```
+
+```{r}
 # remove 
 df_3039 <- df_3039_raw  %>%
-  filter(!(StandardizedName %in% strains_with_HO_deletion)) %>%
+  filter(!(StandardizedName %in% strains_to_exclude)) %>%
   
   # put all undefined ploidy to NA
   mutate(Ploidy = case_when(
     Ploidy  == "?" | Ploidy == "NA" ~ NA, 
-    TRUE ~ Ploidy), 
-    
-    # no zygosity in haploids
-    Zygosity = case_when(
-      Ploidy == "1" ~ NA, 
-      TRUE ~ Zygosity
-    ))
+    TRUE ~ Ploidy))
 
 # number of strains
 nrow(df_3039)
 ```
+
+
 
 
 ```{r}
@@ -592,7 +596,7 @@ plot_ploidy_3039
 write_csv(df_3039, df_3039_clean_path)
 ```
 
-### Supplementary Figure 7
+### Figure S8
 ```{r}
 plot_ploidy_zygosity_3039 <- ggplot(df_3039) +
   geom_bar(aes(x = factor(Ploidy,levels = c("1", "2", "3", "4", "5")), 

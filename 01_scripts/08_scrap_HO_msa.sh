@@ -7,7 +7,7 @@
 # before running the script, activate the conda environment in your terminal with this command:
 # conda activate loss_selfFertility_Scerevisiae_env
 # To run this script:
-# nohup zsh 01_scripts/08_scrap_HO_msa.sh 1>01_scripts/logs/log08a.txt 2>01_scripts/logs/log08b.txt &
+# nohup zsh 01_scripts/08_scrap_HO_msa.sh 1>logs/log08a.txt 2>logs/log08b.txt &
 
 # Paths to access the files
 # input

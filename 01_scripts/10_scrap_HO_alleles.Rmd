@@ -54,14 +54,14 @@ fig2D_path <- "02_data/06_figures/HO_network_annotated.pdf"
 ## OUTPUT 
 
 # tables
-table_variants_HO_path <- "03_output/tables/supptable3_scrap_HO_variants.csv"
-supptable_1_path <- "03_output/tables/supptable1_117_scrap.csv"
+table_variants_HO_path <- "03_output/tables/Dataset_S3_scrap_HO_variants.csv"
+supptable_1_path <- "03_output/tables/Dataset_S1_117_scrap.csv"
 
 # figures
-fig2_path <- "03_output/figures/figure_2.pdf"
-suppfig3_path <- "03_output/figures/suppfigure_3.pdf"
-suppfig4_path <- "03_output/figures/suppfigure_4.pdf"
-suppfig5_path <- "03_output/figures/suppfigure_5.pdf"
+fig2_path <- "03_output/figures/Figure_2.pdf"
+suppfig4_path <- "03_output/figures/Figure_S4.pdf"
+suppfig5_path <- "03_output/figures/Figure_S5.pdf"
+suppfig6_path <- "03_output/figures/Figure_S6.pdf"
 
 # intermediary files
 neutral_variants_path <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral_variants.txt"
@@ -475,7 +475,7 @@ var_cds_funct +
   labs(title = "Variants compared to the pHS2 allele")
 ```
 
-### Supplementary Figure 3A
+### Figure S4A
 ```{r}
 var_freq_funct <- ggplot(table_variants_funct %>%
          mutate(nbOcc_fig = case_when(nbOcc > 40 ~ 40, TRUE ~ nbOcc))) + 
@@ -488,7 +488,7 @@ var_freq_funct <- ggplot(table_variants_funct %>%
 var_freq_funct + 
   labs(title = "Variants compared to the pHS2 allele")
 ```
-### Supplementary Figure 3B
+### Figure S4B
 ```{r}
 var_cds_freq_funct_pos <- ggplot(table_variants_funct %>%
          mutate(nbOcc_fig = case_when(nbOcc > 30 ~ 30, TRUE ~ nbOcc))) +
@@ -509,22 +509,22 @@ var_cds_freq_funct_pos <- ggplot(table_variants_funct %>%
 var_cds_freq_funct_pos +
   labs(title = "Variants compared to the pHS2 allele")
 ```
-### Supplementary Figure 3
+### Figure S4
 ```{r}
-suppfig3 <- plot_grid(var_freq_funct, var_cds_freq_funct_pos, labels = c("A", "B"), rel_heights = c(1, 1.5), ncol = 1)
+suppfig4 <- plot_grid(var_freq_funct, var_cds_freq_funct_pos, labels = c("A", "B"), rel_heights = c(1, 1.5), ncol = 1)
 
-suppfig3
+suppfig4
 
-ggsave(suppfig3_path, height = 6, width = 8)
+ggsave(suppfig4_path, height = 6, width = 8)
 
-remove(suppfig3)
+remove(suppfig4)
 ```
 
 ```{r}
 remove(table_variants_cds, var_cds_freq_funct_pos, var_freq_funct)
 ```
 
-### Supplementary table 3
+### Dataset S3
 ```{r}
 table_variants_funct %>%
   select(
@@ -703,7 +703,7 @@ table_alleles_sumup_functionality <-  table_alleles %>%
 table_alleles_sumup_functionality
 ```  
 
-### Supplementary Figure 4A
+### Figure S5A
 ```{r}
 p_allele_nb_variants <- ggplot(table_alleles) +
   geom_col(aes(x=nb_variants, y = id, fill="neutral")) +
@@ -724,7 +724,7 @@ p_allele_nb_variants <- ggplot(table_alleles) +
 p_allele_nb_variants
 ```
 
-### Supplementary Figure 4B
+### Figure S5B
 ```{r}
 p_allele_frequency_seq <- ggplot(table_alleles) +
   geom_histogram(aes(x = nb_sequences, fill = factor(predicted_functionality, levels = c("undetermined", "non-functional", "functional"))), bins = 2*max(table_alleles$nb_sequences +1)) +
@@ -739,7 +739,7 @@ p_allele_frequency_seq <- ggplot(table_alleles) +
 
 p_allele_frequency_seq
 ```
-### Supplementary Figure 4C
+### Figure S5C
 ```{r}
 p_allele_frequency_isolates <- ggplot(table_alleles) +
   geom_histogram(aes(x = number_isolates, fill = factor(predicted_functionality, levels = c("undetermined", "non-functional", "functional"))), bins = 2*max(table_alleles$number_isolates+1)) +
@@ -755,26 +755,44 @@ p_allele_frequency_isolates <- ggplot(table_alleles) +
 p_allele_frequency_isolates
 ```
 
-### Supplementary Figure 4
+### Figure S5
 
 ```{r}
-suppfig4down <- plot_grid(p_allele_frequency_seq, p_allele_frequency_isolates, labels = c("B", "C"),  ncol = 2)
+suppfig5down <- plot_grid(p_allele_frequency_seq, p_allele_frequency_isolates, labels = c("B", "C"),  ncol = 2)
 
-suppfig4 <- plot_grid(p_allele_nb_variants, suppfig4down, labels = c("A", ""),  ncol = 1, rel_heights = c(1, 0.6))
+suppfig5 <- plot_grid(p_allele_nb_variants, suppfig5down, labels = c("A", ""),  ncol = 1, rel_heights = c(1, 0.6))
 
-ggsave(suppfig4_path, height = 10, width = 8)
+ggsave(suppfig5_path, height = 10, width = 8)
 
-remove(suppfig4down, suppfig3)
+remove(suppfig5down, suppfig4)
 ```
 
 ```{r}
 # clean
-remove(suppfig4, suppfig4_path, p_allele_frequency_seq, p_allele_frequency_isolates, p_allele_nb_variants)
+remove(suppfig5, suppfig5_path, p_allele_frequency_seq, p_allele_frequency_isolates, p_allele_nb_variants)
 ```
 
 ## Focus on non-functional alleles
 
 ### Keep non-functional alleles and non-neutral variants
+```{r}
+nonneutral_var_order_plot <- table_alleles %>%
+  
+  # keep only non-functional alleles
+  filter(predicted_functionality == "non-functional") %>%
+  
+  # keep only non-neutral variants
+  select(all_of(variants_putEffFunct)) %>%
+  
+  mutate(id_allele = row_number()) %>%
+  pivot_longer(cols = -id_allele, names_to = "id_variant", values_to = "presence") %>%
+  group_by(id_variant) %>%
+  summarise(nb = sum(presence)) %>%
+  arrange(desc(nb))
+
+nonneutral_var_order_plot <- nonneutral_var_order_plot$id_variant
+```
+
 ```{r}
 table_nonfunct_alleles = table_alleles %>%
   
@@ -788,13 +806,7 @@ table_nonfunct_alleles = table_alleles %>%
   #unique() %>%
   
   # order by variants
-   arrange(`236T>A`) %>%
-    arrange(`1731T>A`) %>%
-    arrange(`1153G>T`) %>%
-    arrange(`530G>C`) %>%
-    arrange(`1564: 108 bp del.`) %>%
-    arrange(`667G>A`) %>%
-    arrange(`668G>A`) %>%
+   arrange(across(all_of(nonneutral_var_order_plot))) %>%
   
   mutate(id_allele = row_number())
 
@@ -807,12 +819,15 @@ table_nonfunct_alleles
 Creates a matrix 
 ```{r}
 nonfunctional_alleles_matrix <- table_nonfunct_alleles %>% 
-  select(id_allele, variants_putEffFunct) 
+  select(variants_putEffFunct) %>%
+  unique() %>%
+  mutate(id_allele = row_number()) %>%
+  select(id_allele, variants_putEffFunct)
 
 nonfunctional_alleles_matrix
 ```
 
-```{r eval=FALSE, include=FALSE}
+```{r}
 find_minimal_sets <- function(df){
   
   # I. Reduce the table using the single variants
@@ -935,11 +950,11 @@ find_minimal_sets <- function(df){
 }
 ```
 
-```{r eval=FALSE, include=FALSE}
+```{r}
 all_sets <- find_minimal_sets(nonfunctional_alleles_matrix)
 ```
 
-```{r eval=FALSE, include=FALSE}
+```{r}
 # Find which are the variants in this set
 sorted_list <- lapply(all_sets, sort)
 
@@ -1193,7 +1208,7 @@ for (clade in clades) {
     ggt <- ggt + 
       geom_cladelabel(node = node,
                       label = clade,
-                      fontsize = 2.5,
+                      fontsize = 3,
                       offset = -12,
                       align = TRUE,
                       barsize = 0)
@@ -1213,9 +1228,30 @@ ggt2
 ## Add the information about variant presence
 
 ```{r message=TRUE, warning=TRUE}
-variants_for_tree <- 
-  # interesting neutral variants
-  c("413: 1 bp del.", "667G>A", "668G>A", "741G>A", "906G>A","1009G>A", "1059T>C", "1184A>G", "1377C>T", "1564: 108 bp del.", "1611A>G", "1742C>A")
+variants_for_tree <- table_variants_funct %>%
+  
+  # count the number of strains carrying the variant
+  pivot_longer(cols = all_of(seqs_all), names_to = "seq", values_to = "presence") %>%
+  mutate(strain = str_split_i(seq, "\\.", 1)) %>%
+  group_by(id_var, strain) %>%
+  summarise(n = sum(presence)) %>%
+  ungroup() %>%
+  mutate(presence = (n > 0)) %>%
+  group_by(id_var) %>%
+  summarise(n = sum(presence)) %>%
+  
+  # filter for variants carried by 5-50 strains
+  filter(n > 4, n < 51) %>%
+  ungroup() %>%
+  mutate(position =  str_extract(id_var, "\\d+") %>% as.numeric()) %>%
+
+  
+  # arrange by position on the coding sequence
+  arrange(position) 
+
+variants_for_tree
+
+variants_for_tree <- variants_for_tree$id_var
 ```
 
 ### Selected variants
@@ -1256,7 +1292,7 @@ ggt3 <- ggt2 %>%
     #strip.text = element_text(face = "bold"), 
     panel.grid.major.x = element_line(color = "grey90", size = 0.3),
     panel.background = element_blank(),
-    axis.text.x = element_text(angle = 90, hjust = 1, size = 7),
+    axis.text.x = element_text(angle = 90, hjust = 1, size = 10),
     axis.title.x = element_blank(), 
     panel.spacing = unit(0, "pt")) +
   labs(fill = "Type of variant") +
@@ -1266,7 +1302,7 @@ ggt3 <- ggt2 %>%
   
 
 ggt4 <- facet_labeller(ggt3, c("", "")) %>%
-  facet_widths(widths = c(1, 0.4)) 
+  facet_widths(widths = c(1, 0.6)) 
   
 ggt4 
 ```
@@ -1312,7 +1348,7 @@ table_fore_tree_nonneutral <- table_variants_funct %>%
 
 table_fore_tree_nonneutral
 ```
-# Supplementary Figure 5
+# Figure S6
 ```{r message=FALSE, warning=FALSE}
 
 ggt9 <- ggt2 %>% 
@@ -1343,10 +1379,10 @@ ggt10 <- facet_labeller(ggt9, c(Tree = "Phylogenetic tree with predicted thallis
 ggt10 %>%
   facet_widths(widths = c(1, 1.3)) 
 
-ggsave(suppfig5_path, height = 7, width = 12)
+ggsave(suppfig6_path, height = 7, width = 12)
 ```
 
-# Supplementary Table 1
+# Dataset S1
 
 ```{r message=FALSE, warning=FALSE}
 # table containing all the information about the 117 strains of ScRAP

@@ -7,7 +7,7 @@
 # before running the script, activate the conda environment in your terminal with this command:
 # conda activate loss_selfFertility_Scerevisiae_env
 # To run this script:
-# nohup bash 01_scripts/01_detect_artificial_insertions_in_scrap.sh 1>01_scripts/logs/log01a.txt 2>01_scripts/logs/log01b.txt &
+# nohup bash 01_scripts/01_detect_artificial_insertions_in_scrap.sh 1>logs/log01a.txt 2>logs/log01b.txt &
 
 # Paths
 PATH_SCRAP_ASSEMBLIES="02_data/01_scrap/nuclear_assemblies"

@@ -7,7 +7,7 @@
 # before running the script, activate the conda environment in your terminal with this command:
 # conda activate loss_selfFertility_Scerevisiae_env
 # To run this script:
-# nohup bash 01_scripts/06_blast_HO.sh  1>01_scripts/logs/log06a.txt 2>01_scripts/logs/log06b.txt &
+# nohup bash 01_scripts/06_blast_HO.sh  1>logs/log06a.txt 2>logs/log06b.txt &
 
 # Paths to access the files
 

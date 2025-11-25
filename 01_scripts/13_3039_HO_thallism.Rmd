@@ -26,14 +26,6 @@ library(UpSetR)
 library(ggmosaic)
 ```
 
-```{r}
-# paths
-path_3039_db <- "03_output/01_cleaned_panels/3039_clean.csv"
-path_ecology_3039 <- "02_data/03_3039GP/2915_ecologicalNiche_thallism.xlsx"
-path_table_variants_3039 <- "03_output/06_HO_sequences_3039/HOcds_variants_and_effects_pHS2_vs_3039.csv"
-path_artificial_HO_deletion <- "03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
-path_scrap_neutral_variants <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral_variants.txt"
-```
 
 
 ```{r}
@@ -49,7 +41,7 @@ path_ecology_3039 <- "02_data/03_3039GP/2915_ecologicalNiche_thallism.xlsx"
 path_table_variants_3039 <- "03_output/06_HO_sequences_3039/HOcds_variants_and_effects_pHS2_vs_3039.csv"
 
 # artificial HO deletion
-path_artificial_HO_deletion <- "03_output/01_cleaned_panels/02_strains_with_artificial_HO_deletion_1011/strains_with_artificial_HO_deletion_1011.txt"
+path_strains_to_exclude <- "03_output/01_cleaned_panels/strains_to_exclude_3034GP.txt"
 
 # neutral HO variants from scrap
 path_scrap_neutral_variants <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral_variants.txt"
@@ -59,13 +51,13 @@ path_scrap_neutral_variants <- "03_output/05_HO_sequences_scrap/scrap_HO_neutral
 ## OUTPUT 
 
 # tables
-HO_variants_3034_path <- "03_output/tables/supptable4_3034GP_HO_variants.csv"
-table_3039_with_analyses_path <- "03_output/tables/supptable5_3034GP_strains_thallism.csv"
+HO_variants_3034_path <- "03_output/tables/Dataset_S4_3034GP_HO_variants.csv"
+table_3039_with_analyses_path <- "03_output/tables/Dataset_S5_3034GP_strains_thallism.csv"
 
 # figures
-fig3_path <- "03_output/figures/figure_3.pdf"
-suppfig6_path <- "03_output/figures/suppfigure_6.pdf"
-fig4_path <- "03_output/figures/figure_4.pdf"
+fig3_path <- "03_output/figures/Figure_3.pdf"
+suppfig7_path <- "03_output/figures/Figure_S7.pdf"
+fig4_path <- "03_output/figures/Figure_4.pdf"
 
 # creates the directories for the outputs
 if (!dir.exists("03_output/tables")) {
@@ -92,7 +84,7 @@ myTheme <- function() {
 
 ## Artificial HO deletion
 ```{r}
-strains_with_artificial_HO_deletion <- readLines(path_artificial_HO_deletion)
+strains_with_artificial_HO_deletion <- readLines(path_strains_to_exclude)
 ```
 
 ## Load metadata
@@ -123,7 +115,7 @@ strains_3039 <- metadata_db$StandardizedName
 
 ```{r}
 # clean
-remove(path_3039_db, path_artificial_HO_deletion, strains_with_artificial_HO_deletion)
+remove(path_3039_db, path_strains_to_exclude, strains_with_artificial_HO_deletion)
 ```
 
 # Variants
@@ -508,7 +500,7 @@ fig3
 ggsave(fig3_path, width = 10, height = 10)
 ```
 
-### Supplementary Figure 6
+### Figure S7
 ```{r}
 plot_prop_het <- ggplot(table_variants_funct %>%
                           mutate(nb_genotypes = case_when(
@@ -525,7 +517,7 @@ plot_prop_het <- ggplot(table_variants_funct %>%
 
 plot_prop_het
 
-ggsave(suppfig6_path, width = 6, height = 8)
+ggsave(suppfig7_path, width = 6, height = 8)
 ```
 
 ```{r}
@@ -542,6 +534,7 @@ table_variants_funct %>%
   select(id_var, proportion_heterozygous_state, contains("nbOcc")) %>%
   arrange(desc(nbOcc_notnormalized))
 ```
+
 ```{r}
 remove(table_variants_cds, var_cds_freq_funct_pos, var_cds_funct, var_freq_funct, path_scrap_neutral_variants, var_cds_freq_funct_pos_annot, neutral_variants_scrap, plot_prop_het, fig3_AB, fig3_C, fig3)
 ```
@@ -583,7 +576,7 @@ variants_LoF <- table_variants_funct$id_var[table_variants_funct$effect_function
 length(variants_LoF)
 ```
 
-### Supplementary Table 4
+### Dataset S4
 ```{r}
 table_variants_funct %>% 
   select(id_var, pos_ref, ref_nt, alt_nt, pos_codon, pos_in_codon, ref_codon, ref_amino_acid, alt_codon, alt_amino_acid, nbOcc, effect_translated_sequence, effect_functionality, contains("YDL227C_HOchromosome4:46271-48031")) %>%
@@ -711,8 +704,8 @@ p_genotype_nb_variants
 
 ```{r}
 p_genotype_frequency_isolates <- ggplot(table_genotypes) +
-  geom_histogram(aes(x = number_isolates, fill = factor(predicted_functionality, levels = c("unknown", "non-functional", "functional"))), ) +
-  scale_fill_manual(values = c("functional" = "#c2f9c9" , "non-functional" = "#661100", "heterozygous_non-functional"  = "#f89c4f", "unknown" = "gray90")) +
+  geom_histogram(aes(x = number_isolates, fill = factor(predicted_functionality, levels = c("unknown", "non-functional", "heterozygous_non-functional",  "functional")))) +
+  scale_fill_manual(values = c("functional" = "#c2f9c9" , "non-functional" = "#882222", "heterozygous_non-functional"  = "#f89c4f", "unknown" = "gray90")) +
   myTheme() +
   theme(legend.position = c(.9, .9),  
     legend.justification = c(1, 1)) +
@@ -784,7 +777,7 @@ thallism_3039 <- metadata_db %>%
 
 thallism_3039
 ```
-### Supplementary Table 5
+### Dataset S5
 ```{r}
 write_csv(thallism_3039,  
           table_3039_with_analyses_path)
@@ -813,7 +806,13 @@ thallism_for_plots <- complete_thallism_3039_sorted %>%
     thallism == "homothallic" ~ "homothallic_full", 
     thallism == "unknown" ~ "unknown_full", 
   )) %>%
-  separate(thallism_tosplit, into = c("thallism", "partial"), sep = "_")
+  separate(thallism_tosplit, into = c("thallism", "partial"), sep = "_") %>%
+  mutate(Zygosity = factor(Zygosity, levels = c("Homozygous", "Heterozygous")))
+
+thallism_for_plots %>%
+  group_by(thallism) %>%
+  summarise(n = n(), 
+            freq = n / nrow(thallism_for_plots))
 ```
 
 
@@ -821,9 +820,9 @@ thallism_for_plots <- complete_thallism_3039_sorted %>%
 ```{r}
 fig4A <- ggplot(thallism_for_plots) +
   geom_bar(aes(x = factor(Ploidy, levels = c("1","2","3","4","5")), 
-               fill = factor(thallism, levels=c("unknown", "heterothallic", "homothallic")), 
+               fill = factor(thallism, levels=c("unknown",  "homothallic", "heterothallic")), 
               )) + 
-  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#882222", "unknown" = "grey90"), na.value = "transparent") +
   myTheme() + 
   labs(x = "ploidy", y = "number of isolates", fill = "thallism") +
   theme(legend.position = "inside", 
@@ -866,84 +865,82 @@ thallism_for_plots %>%
          haploid_prop = haploid / total, 
          diploid_prop = diploid / total, 
          polyploid_prop = polyploid / total, 
-         unknown_prop = unknown / total
-         )
-```
-
-
-```{r}
-thallism_3039_for_mosaic <- thallism_for_plots %>%
-  filter(!is.na(Zygosity),
-         !is.na(Clade)) %>%
-  mutate(Zygosity = factor(Zygosity, levels = c("Homozygous", "Heterozygous")))
-nrow(thallism_3039_for_mosaic)
+         unknown_prop = unknown / total)
 ```
 
 
 ## Figure 4B
-```{r}
-intersection_count = thallism_3039_for_mosaic %>%
-  group_by(Zygosity) %>%
-  mutate(prop_zygosity = n() / nrow(thallism_3039_for_mosaic)) %>%
-  ungroup() %>%
-  group_by(Zygosity, thallism, prop_zygosity) %>%
-  mutate(prop_zygthall = n() / (nrow(thallism_3039_for_mosaic) * prop_zygosity)) %>%
-  select(Zygosity, thallism, prop_zygosity, prop_zygthall) %>%
-  unique() %>%
-  pivot_wider(names_from = thallism, values_from = prop_zygthall)  %>%
-  mutate(unknown =  heterothallic + homothallic + (unknown / 2), 
-         homothallic = heterothallic + (homothallic / 2),
-         heterothallic =  heterothallic / 2) %>%
-  pivot_longer(cols = c( "heterothallic", "homothallic", "unknown"), names_to = "thallism", values_to = "pos_y") %>%
-  mutate(pos_x = case_when(
-    Zygosity == "Heterozygous" ~ (1-prop_zygosity) + (prop_zygosity /2), 
-    TRUE ~ prop_zygosity /2
-  )) %>%
-  select(Zygosity, thallism, pos_x, pos_y)
 
-homozygous_pos = mean(intersection_count$prop_zygosity[intersection_count$Zygosity == "Homozygous"]) / 2
-heterozygous_pos = (2*homozygous_pos)  + (mean(intersection_count$prop_zygosity[intersection_count$Zygosity == "Heterozygous"]) / 2)
-  
-fig4B <- ggplot(thallism_3039_for_mosaic %>% mutate(pop = "All strains")) +
-  geom_mosaic(aes(x = product(thallism, Zygosity), 
-              fill = thallism), 
-              color = "black") +
-  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
-    facet_wrap(pop ~ .)   +
-    annotate(geom = "text", x = 0.5, y = 1.1, 
-             label = paste0("n=", 
-                             nrow(thallism_3039_for_mosaic), 
-                            ", ", 
-                            100 * round(sum(thallism_3039_for_mosaic$Ploidy > 2, na.rm = TRUE) / nrow(thallism_3039_for_mosaic), 2), 
-                            "% polyploids"), size = 4, color = "grey30", face = "bold") +
-  annotate(geom = "text", x = homozygous_pos, y = -0.1, label = "%homozygous", size = 3, color = "grey30") +
-  annotate(geom = "text", x = heterozygous_pos, y = -0.1, label = "%heterozygous", size = 3, color = "grey30") +
-  ylab("")+
-  xlab('%homozygous strains')  +          
+```{r}
+zygosity_count <- thallism_for_plots %>%
+  group_by(Zygosity) %>%
+  summarise(
+    nb_zyg = n(),
+    prop_zyg = nb_zyg / nrow(thallism_for_plots)) %>%
+  ungroup() %>%
+  mutate(pos_x = case_when(
+    Zygosity == "Homozygous" ~ prop_zyg / 2, 
+    Zygosity == "Heterozygous" ~ 1 - prop_zyg / 2)) 
+zygosity_count 
+
+thallism_count = thallism_for_plots %>%
+  group_by(thallism) %>%
+  summarise(
+    nb_thall = n(),
+    prop_thall = nb_thall / nrow(thallism_for_plots)) %>%
+  ungroup()
+thallism_count 
+```
+
+```{r}
+total = nrow(thallism_for_plots) %>% as.character()
+polyploid_prop = (100 * nrow(thallism_for_plots %>% filter(Ploidy > 2)) / nrow(thallism_for_plots)) %>% round(digits = 0) %>% as.character()
+
+fig4B <- ggplot(thallism_for_plots %>% mutate(pop = "All strains")) +
+  geom_mosaic(aes(x = product(thallism, Zygosity), fill = thallism), 
+              color = "transparent", alpha = 1) +
+  scale_x_productlist(labels = NULL) +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#882222", "unknown" = "grey90"), 
+                    breaks = c("unknown", "homothallic", "heterothallic"), 
+                    labels = c(
+                      "homothallic" = paste(as.character(thallism_count$nb_thall[thallism_count$thallism=="homothallic"]), "homothallics"),
+                      "heterothallic" = paste(as.character(thallism_count$nb_thall[thallism_count$thallism=="heterothallic"]), "heterothallics"), 
+                      "unknown" = paste(as.character(thallism_count$nb_thall[thallism_count$thallism=="unknown"]), "unknown"))) +
+  geom_mosaic_text(aes(x = product(thallism, Zygosity), fill = thallism, label = after_stat(.wt)), size = 3) + 
+  geom_text(data = zygosity_count, inherit.aes = FALSE,
+            aes(x = pos_x, y = -0.05, label = paste(as.character(nb_zyg), tolower(Zygosity))), size = 3) +
+  annotate(geom = "text", x = 0.5, y = 1.1, label = paste0("n=", total,", ", polyploid_prop, "% polyploids"),
+            size = 4,
+            color = "grey30") +
+    labs(x='%homozygous strains', y=NULL) +
+  facet_wrap(pop ~ .)   +
+
+  #theme_void() +
   theme(axis.ticks.x = element_blank(),             
         axis.ticks.y = element_blank(),
         axis.text.x = element_blank(), 
         axis.text.y = element_blank(),
-        
+        panel.grid = element_blank(),
         panel.background = element_blank(),
         plot.background = element_blank(),
         legend.title = element_text(color = 'black', face = 'bold'), 
         strip.text = element_text(size =12, color = 'black', face = 'bold'),
         strip.background = element_blank(), 
         legend.position = "right") 
+    
+remove(total, polyploid_prop)
 
 fig4B
 ```
-
 
 ```{r}
 thallism_for_plots %>% 
   group_by(Zygosity, thallism) %>% 
   summarise(n = n()) %>%
   pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
-  mutate(total = Homozygous + Heterozygous + `NA`, 
-         Homozygous_prop = Homozygous / total, 
-         Heterozygous_prop = Heterozygous / total
+  mutate(total = Homozygous + Heterozygous, 
+         Heterozygous_prop = Heterozygous / total, 
+         Homozygous_prop = Homozygous / total
          )
 ```
 
@@ -959,14 +956,13 @@ thallism_for_plots %>%
          )
 ```
 
-
-
-
-
 ## Figure 4C
 
 ```{r}
-polyploidy_proportion <- thallism_3039_for_mosaic %>% 
+thallism_for_plots_clades <- thallism_for_plots %>%
+  filter(Clade != "NA")
+
+polyploidy_proportion <- thallism_for_plots_clades %>% 
   mutate(ploidy = case_when( 
     Ploidy > 2 ~"polyploid", 
     TRUE ~ "other"
@@ -977,23 +973,26 @@ polyploidy_proportion <- thallism_3039_for_mosaic %>%
   mutate(total = polyploid + other, 
          polyploid_prop = 100 * round(polyploid / total, 2))
 
-fig4C <- ggplot(thallism_3039_for_mosaic) +
+fig4C <- ggplot(thallism_for_plots_clades) +
   geom_mosaic(aes(x = product(thallism, Zygosity), 
               fill = thallism), 
-              color = "black") +
-  facet_wrap(Clade ~ ., ncol = 6)   +
+              color = "transparent", 
+              alpha = 1) +
+  facet_wrap(Clade ~ ., ncol = 7)   +
       geom_text(data = polyploidy_proportion, 
             aes(x = 0.5, y = 1.1, label = paste0("n=", total,", ", polyploid_prop, "% polyploids")),
             size = 2.5,
             inherit.aes = FALSE, 
             color = "grey30") +
-  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#882222", "unknown" = "grey90"), na.value = "transparent") +
   xlab('%homozygous strains')  + 
   ylab("")+
+  #theme_void() +
   theme(axis.ticks.x = element_blank(),             
         axis.ticks.y = element_blank(),
         axis.text.x = element_blank(), 
         axis.text.y = element_blank(),
+        panel.grid = element_blank(),
         panel.background = element_blank(),
         plot.background = element_blank(),
         legend.title = element_text(color = 'black', face = 'bold'), 
@@ -1006,36 +1005,7 @@ fig4C
 ```
 
 ```{r}
-homothallic_clades <- thallism_for_plots %>% 
-  group_by(Clade, thallism) %>% 
-  summarise(n = n()) %>% 
-  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
-  mutate(total = heterothallic + homothallic + unknown, 
-         heterothallic_prop = heterothallic / total, 
-         homothallic_prop = homothallic / total, 
-         unknown_prop = unknown / total
-         ) %>%
-  filter(homothallic_prop > 0.80)
-
-homothallic_clades
-
-homothallic_clades <- homothallic_clades$Clade
-
-
-thallism_for_plots %>% 
- filter(Clade %in% homothallic_clades) %>%
-  group_by(Clade, Zygosity) %>% 
-  summarise(n = n()) %>%
-  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
-  mutate(total = Homozygous + Heterozygous, 
-         Homozygous_prop = Homozygous / total, 
-         Heterozygous_prop = Heterozygous / total
-         ) %>%
-  arrange(Heterozygous_prop) 
-```
-
-```{r}
-heterothallic_clades <- thallism_for_plots %>% 
+heterothallic_clades <- thallism_for_plots_clades %>% 
   group_by(Clade, thallism) %>% 
   summarise(n = n()) %>% 
   pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
@@ -1051,7 +1021,7 @@ heterothallic_clades
 heterothallic_clades <- heterothallic_clades$Clade
 
 
-thallism_for_plots %>% 
+thallism_for_plots_clades %>% 
  filter(Clade %in% heterothallic_clades) %>%
   group_by(Clade, Zygosity) %>% 
   summarise(n = n()) %>%
@@ -1062,12 +1032,42 @@ thallism_for_plots %>%
          ) %>%
   arrange(Heterozygous_prop) %>%
   left_join(polyploidy_proportion)
+```
 
+```{r}
+homothallic_clades <- thallism_for_plots_clades %>% 
+  group_by(Clade, thallism) %>% 
+  summarise(n = n()) %>% 
+  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
+  mutate(total = heterothallic + homothallic + unknown, 
+         heterothallic_prop = heterothallic / total, 
+         homothallic_prop = homothallic / total, 
+         unknown_prop = unknown / total
+         ) %>%
+  filter(homothallic_prop > 0.80)
+
+homothallic_clades
+
+homothallic_clades <- homothallic_clades$Clade
+
+thallism_for_plots_clades %>% 
+ filter(Clade %in% homothallic_clades) %>%
+  group_by(Clade, Zygosity) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
+  mutate(total = Homozygous + Heterozygous, 
+         Homozygous_prop = Homozygous / total, 
+         Heterozygous_prop = Heterozygous / total
+         ) %>%
+  arrange(Heterozygous_prop) %>%
+  left_join(polyploidy_proportion)
 ```
 
 
+
+
 ```{r}
-both_clades <- thallism_for_plots %>% 
+both_clades <- thallism_for_plots_clades %>% 
   group_by(Clade, thallism) %>% 
   summarise(n = n()) %>% 
   pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
@@ -1084,7 +1084,7 @@ both_clades
 both_clades <- both_clades$Clade
 
 
-thallism_for_plots %>% 
+thallism_for_plots_clades %>% 
  filter(Clade %in% both_clades) %>%
   group_by(Clade, Zygosity) %>% 
   summarise(n = n()) %>%
@@ -1099,45 +1099,6 @@ thallism_for_plots %>%
 
 ```
 
-
-```{r}
-thallism_for_plots %>% 
-  group_by(Clade, Zygosity) %>% 
-  summarise(n = n()) %>%
-  pivot_wider(names_from = Zygosity, values_from = n, values_fill = 0) %>%
-  mutate(total = Homozygous + Heterozygous, 
-         Homozygous_prop = Homozygous / total, 
-         Heterozygous_prop = Heterozygous / total
-         ) %>%
-  filter(Homozygous_prop > 0.80)
-  
-```
-
-```{r}
-thallism_for_plots %>% 
-  group_by(Clade, thallism) %>% 
-  summarise(n = n()) %>% 
-  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
-  mutate(total = heterothallic + homothallic + unknown, 
-         heterothallic_prop = heterothallic / total, 
-         homothallic_prop = homothallic / total, 
-         unknown_prop = unknown / total
-         )
-```
-
-```{r}
-thallism_for_plots %>% 
-  group_by(Clade, thallism) %>% 
-  summarise(n = n()) %>%
-  pivot_wider(names_from = thallism, values_from = n, values_fill = 0) %>%
-  mutate(total = heterothallic + homothallic + unknown, 
-         heterothallic_prop = heterothallic / total, 
-         homothallic_prop = homothallic / total, 
-         unknown_prop = unknown / total
-         ) %>%
-  filter(homothallic_prop > 0.9)
-  
-```
 
 
 ### Figure 4D
@@ -1154,13 +1115,13 @@ count_ecology <- thallism_for_plots %>%
 
 fig4D <- ggplot(thallism_for_plots %>% filter(!is.na(Ecological_niche))) +
   geom_bar(aes(x = factor(thallism, levels=c("heterothallic","homothallic", "unknown")),  
-               fill = factor(thallism, levels=c("unknown", "heterothallic", "homothallic"))), 
+               fill = factor(thallism, levels=c("unknown",  "homothallic", "heterothallic"))), 
            stat = "count", width = 1) +
   
   geom_text(data = count_ecology, aes(label = paste("n =",n), y = max), x = 3, inherit.aes = FALSE, size = 3, vjust = 1 , hjust = 0.5) + 
 
   facet_wrap(vars(Ecological_niche), scale = "free_y", nrow = 1) +
-  scale_fill_manual(values=c("homothallic" = "#c2f9c9" ,  "heterothallic" = "#661100", "unknown" = "grey90"), na.value = "transparent") +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" ,  "heterothallic" = "#882222", "unknown" = "grey90"), na.value = "transparent") +
   myTheme() + 
   theme( axis.title.x = element_blank(), 
         axis.ticks.x = element_blank(),    
@@ -1185,6 +1146,7 @@ thallism_for_plots %>%
          homothallic_prop = homothallic / total, 
          unknown_prop = unknown / total)
 ```
+
 ```{r}
 thallism_for_plots %>%
   group_by(thallism, Ecological_niche) %>%
@@ -1210,20 +1172,19 @@ thallism_for_plots %>%
 plot_spacer_clean <- plot_spacer() + theme_void()
 fig4AB  <- plot_grid(fig4A,  plot_spacer_clean, fig4B, 
                   ncol = 3, labels = c("A", "",  "B"), 
-                  rel_widths = c(1, 0.1, 1))
+                  rel_widths = c(1, 0.1, 1.2))
 
 fig4ABC  <- plot_grid(fig4AB, 
                       plot_spacer_clean, 
                       fig4C, 
                   ncol = 1, labels = c("", "", "C"), 
-                  rel_heights = c(1,0.1, 4))
+                  rel_heights = c(1,0.1, 3))
 
-figure_4 <- plot_grid(fig4ABC, plot_spacer_clean, fig4D, ncol = 1, labels = c("", "", "D"), rel_heights = c(5, 0.1, 1))
-
+figure_4 <- plot_grid(fig4ABC, plot_spacer_clean, fig4D, ncol = 1, labels = c("", "", "D"), rel_heights = c(6, 0.1, 1))
 
 figure_4
 
-ggsave(fig4_path, width = 8, height = 15)
+ggsave(fig4_path, width = 9.5, height = 15)
 ```
 
 

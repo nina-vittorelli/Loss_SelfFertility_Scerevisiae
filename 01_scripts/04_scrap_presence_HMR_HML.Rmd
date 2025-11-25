@@ -57,8 +57,6 @@ myTheme <- function() {
 }
 ```
 
-
-
 #  Load data
 
 ## Metadata
