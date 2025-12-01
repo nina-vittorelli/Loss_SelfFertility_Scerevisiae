@@ -736,8 +736,8 @@ table_genotypes_sumup_functionality <-  table_genotypes %>%
   mutate(total_number_genotypes = n(),
     
     # count the number of isolates
-    total_isolates = paste(str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("_YDL", 1) %>% unique() %>% sort(), collapse = ", "),
-    total_number_isolates = str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("_YDL", 1) %>% unique() %>% length(), 
+    total_isolates = paste(str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("_YDL227C", 1) %>% unique() %>% sort(), collapse = ", "),
+    total_number_isolates = str_split(sequences, "\\, ") %>% unlist() %>% str_split_i("_YDL227C", 1) %>% unique() %>% length(), 
     
     proportion_isolates = total_number_isolates / 2915
     
@@ -779,7 +779,11 @@ thallism_3039
 ```
 ### Dataset S5
 ```{r}
-write_csv(thallism_3039,  
+thallism_3039_for_writing <- thallism_3039 %>%
+  # replace the semicolons by _ to avoid mistakes in case the file is open with excel
+  mutate(Aneuploidy = Aneuploidy %>% str_replace_all(";", "_"))
+
+write_csv(thallism_3039, 
           table_3039_with_analyses_path)
 ```
 
@@ -956,6 +960,56 @@ thallism_for_plots %>%
          )
 ```
 
+## SuperClades
+
+
+```{r}
+thallism_for_plots_superclades <- thallism_for_plots %>%
+  filter(SuperClade != "NA")
+
+polyploidy_proportion <- thallism_for_plots_superclades %>% 
+  mutate(ploidy = case_when( 
+    Ploidy > 2 ~"polyploid", 
+    TRUE ~ "other"
+  )) %>%
+  group_by(SuperClade, ploidy) %>% 
+  summarise(n = n()) %>%
+  pivot_wider(names_from = ploidy, values_from = n, values_fill = 0) %>%
+  mutate(total = polyploid + other, 
+         polyploid_prop = 100 * round(polyploid / total, 2))
+
+superclade_plot <- ggplot(thallism_for_plots_superclades) +
+  geom_mosaic(aes(x = product(thallism, Zygosity), 
+              fill = thallism), 
+              color = "transparent", 
+              alpha = 1) +
+  facet_wrap(SuperClade ~ ., ncol = 7)   +
+      geom_text(data = polyploidy_proportion, 
+            aes(x = 0.5, y = 1.1, label = paste0("n=", total,", ", polyploid_prop, "% polyploids")),
+            size = 2.5,
+            inherit.aes = FALSE, 
+            color = "grey30") +
+  scale_fill_manual(values=c("homothallic" = "#c2f9c9" , "heterothallic" = "#882222", "unknown" = "grey90"), na.value = "transparent") +
+  xlab('%homozygous strains')  + 
+  ylab("")+
+  #theme_void() +
+  theme(axis.ticks.x = element_blank(),             
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_blank(), 
+        axis.text.y = element_blank(),
+        panel.grid = element_blank(),
+        panel.background = element_blank(),
+        plot.background = element_blank(),
+        legend.title = element_text(color = 'black', face = 'bold'), 
+        strip.text = element_text(size = 7, color = 'black', face = 'bold'),
+        strip.background = element_blank(), 
+        legend.position = "none") 
+
+remove(polyploidy_proportion)
+
+superclade_plot
+```
+
 ## Figure 4C
 
 ```{r}
@@ -1001,7 +1055,6 @@ fig4C <- ggplot(thallism_for_plots_clades) +
         legend.position = "none") 
 
 fig4C
-  
 ```
 
 ```{r}
