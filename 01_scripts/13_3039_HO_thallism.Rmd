@@ -783,7 +783,7 @@ thallism_3039_for_writing <- thallism_3039 %>%
   # replace the semicolons by _ to avoid mistakes in case the file is open with excel
   mutate(Aneuploidy = Aneuploidy %>% str_replace_all(";", "_"))
 
-write_csv(thallism_3039, 
+write_csv(thallism_3039_for_writing, 
           table_3039_with_analyses_path)
 ```
 
